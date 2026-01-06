@@ -11,6 +11,7 @@ const ComponentConfig = () => import('../views/ComponentConfig.vue')
 const CarouselDetection = () => import('../views/CarouselDetection.vue')
 const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
 const InspectRelationship = () => import('../views/InspectRelationship.vue')
+const MainDashboard = () => import('../views/MainDashboard.vue')
 //const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
@@ -115,6 +116,16 @@ const routes = [
       requiresAuth: true
     }
   },
+
+    {
+        path: '/main-dashboard',
+        name: 'MainDashboard',
+        component: MainDashboard,
+        meta: {
+         title: '主控台',
+         requiresAuth: true
+        }
+      },
 
   // {
   //   path: '/media-library',
