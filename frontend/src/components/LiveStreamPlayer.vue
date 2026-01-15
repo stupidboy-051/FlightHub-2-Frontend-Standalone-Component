@@ -157,16 +157,52 @@ export default {
     }
   },
   computed: {
-    // 🔥 恢复到之前的 FMP4 格式（能正常工作）
+    // 🔥 使用代理路径访问 ZLM，避免跨域问题
     streamUrl() {
-      // 如果你想灵活传参，可以使用下面这行：
-      if (this.streamUrlOverride) return this.streamUrlOverride
-      if (!this.streamId) return ''
-      // 使用 FMP4 格式 (.live.mp4)，浏览器原生支持
-      return `${this.zlmServer}/live/${this.streamId}.live.mp4`
+      // 如果传入了 Override URL，进行智能处理
+      if (this.streamUrlOverride) {
+        const url = this.streamUrlOverride
+        
+        // 🔥 智能转换 RTMP 地址为 HTTP-MP4
+        if (url.startsWith('rtmp://')) {
+          console.warn('检测到 RTMP 地址，尝试转换为 HTTP-MP4 播放地址:', url)
+          try {
+            // 解析 rtmp://host:port/app/streamId
+            const urlObj = new URL(url)
+            const pathParts = urlObj.pathname.split('/').filter(p => p)
+            // 通常 pathParts 是 ['live', 'dock01']
+            if (pathParts.length >= 2) {
+              const app = pathParts[0]
+              const stream = pathParts[1]
+              
+              // 重新构建为 HTTP-MP4
+              const isDev = process.env.NODE_ENV === 'development'
+              if (isDev) {
+                return `/zlm/${app}/${stream}.live.mp4`
+              } else {
+                return `${this.zlmServer}/${app}/${stream}.live.mp4`
+              }
+            }
+          } catch (e) {
+            console.error('RTMP 地址解析失败:', e)
+          }
+        }
+        
+        // 如果不是 RTMP 或解析失败，原样返回
+        return url
+      }
 
-      // 如果你想强制写死 drone03 测试，可以用这行：
-      // return `${this.zlmServer}/live/drone03.live.mp4`
+      if (!this.streamId) return ''
+
+      // 🔥 开发环境使用代理，生产环境直接访问
+      // 开发环境: /zlm/live/dock01.live.mp4 -> http://192.168.10.10/live/dock01.live.mp4
+      // 生产环境: 直接使用 zlmServer 地址
+      const isDev = process.env.NODE_ENV === 'development'
+      if (isDev) {
+        return `/zlm/live/${this.streamId}.live.mp4`
+      } else {
+        return `${this.zlmServer}/live/${this.streamId}.live.mp4`
+      }
     }
   },
   mounted() {

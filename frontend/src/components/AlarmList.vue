@@ -31,7 +31,7 @@
       <select v-model="waylineIdFilter" @change="loadAlarms" class="filter-select">
         <option value="">全部航线</option>
         <option v-for="wayline in waylines" :key="wayline.id" :value="wayline.wayline_id">
-          {{ wayline.wayline_id }} - {{ wayline.name }}
+          {{ wayline.name }}
         </option>
       </select>
 
