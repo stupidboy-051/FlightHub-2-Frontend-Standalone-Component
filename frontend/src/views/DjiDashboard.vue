@@ -14,94 +14,181 @@
         <h1 class="page-title">无人机巡检主控台</h1>
         <p class="page-subtitle">实时监控与任务管理</p>
       </div>
+      <div class="mode-switch">
+        <button
+          class="mode-tab"
+          :class="{ active: currentMode === 'monitor' }"
+          @click="setMode('monitor')"
+        >
+          无人机数字孪生控制台
+        </button>
+        <button
+          class="mode-tab"
+          :class="{ active: currentMode === 'analysis' }"
+          @click="setMode('analysis')"
+        >
+          航线报警点展示台
+        </button>
+      </div>
     </div>
 
     <!-- 主内容区 -->
     <div class="dashboard-content">
       <!-- 左侧面板 - 机场列表 -->
       <div class="side-panel left-panel">
-        <div class="panel-section dock-panel">
-          <div class="panel-header">
-            <h3 class="panel-title">机场列表</h3>
-            <button class="panel-action" @click="loadDockList" :disabled="dockLoading">
-              {{ dockLoading ? '加载中...' : '刷新' }}
-            </button>
-          </div>
-          <div class="panel-body dock-panel-body">
-            <div v-if="dockLoading && docks.length === 0" class="panel-placeholder">正在加载机场...</div>
-            <div v-else-if="dockLoadError" class="panel-placeholder error">{{ dockLoadError }}</div>
-            <div v-else-if="docks.length === 0" class="panel-placeholder">暂无机场数据</div>
-            <ul v-else class="dock-list">
-              <li
-                  v-for="dock in docks"
-                  :key="dock.id || dock.dock_sn"
-                  class="dock-item"
-                  :class="{ active: isDockSelected(dock) }"
-                  @click="handleDockSelected(dock)"
-              >
-                <div class="dock-item-header">
-                  <div class="dock-item-name">
-                    <span class="status-dot" :class="{ online: dock.is_online }"></span>
-                    <span class="dock-name">{{ getDockDisplayName(dock) }}</span>
-                  </div>
-                  <span class="dock-status" :class="{ online: dock.is_online }">
-                    {{ dock.is_online ? '在线' : '离线' }}
-                  </span>
-                </div>
-                <div class="dock-item-meta">
-                  <span class="dock-sn">SN {{ dock.dock_sn || '--' }}</span>
-                  <span v-if="dock.drone_sn" class="drone-sn">无人机 {{ dock.drone_sn }}</span>
-                  <span class="drone-state" :class="{ working: isDroneWorking(dock) }">
-                    {{ getDroneStateLabel(dock) }}
-                  </span>
-                </div>
-              </li>
-            </ul>
-
-            <div class="dock-latest">
-              <div class="dock-latest-header">
-                <span class="dock-latest-title">最新位置</span>
-                <div class="dock-latest-tags" v-if="selectedDock">
-                  <span v-if="selectedDock?.drone_sn" class="dock-latest-sn">{{ selectedDock.drone_sn }}</span>
-                  <span class="dock-latest-state" :class="{ working: isDroneWorking(selectedDock) }">
-                    {{ getDroneStateLabel(selectedDock) }}
-                  </span>
-                </div>
-              </div>
-              <div v-if="!selectedDock" class="panel-placeholder small">请选择机场</div>
-              <div v-else-if="!selectedDock.drone_sn" class="panel-placeholder small">该机场未绑定无人机</div>
-              <div v-else-if="positionLoading && latestPositions.length === 0" class="panel-placeholder small">读取中...</div>
-              <div v-else-if="latestPositions.length === 0" class="panel-placeholder small">暂无位置数据</div>
-              <div v-else class="position-list">
-                <div
-                    v-for="(pos, index) in latestPositions"
-                    :key="pos.id || pos.timestamp || index"
-                    class="position-item"
+        <div class="panel-group" v-show="currentMode === 'monitor'">
+          <div class="panel-section dock-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">机场列表</h3>
+              <button class="panel-action" @click="loadDockList" :disabled="dockLoading">
+                {{ dockLoading ? '加载中...' : '刷新' }}
+              </button>
+            </div>
+            <div class="panel-body dock-panel-body">
+              <div v-if="dockLoading && docks.length === 0" class="panel-placeholder">正在加载机场...</div>
+              <div v-else-if="dockLoadError" class="panel-placeholder error">{{ dockLoadError }}</div>
+              <div v-else-if="docks.length === 0" class="panel-placeholder">暂无机场数据</div>
+              <ul v-else class="dock-list">
+                <li
+                    v-for="dock in docks"
+                    :key="dock.id || dock.dock_sn"
+                    class="dock-item"
+                    :class="{ active: isDockSelected(dock) }"
+                    @click="handleDockSelected(dock)"
                 >
-                  <div class="position-row">
-                    <span class="position-label">时间</span>
-                    <span class="position-value">{{ formatPositionTime(pos.timestamp || pos.created_at) }}</span>
+                  <div class="dock-item-header">
+                    <div class="dock-item-name">
+                      <span class="status-dot" :class="{ online: dock.is_online }"></span>
+                      <span class="dock-name">{{ getDockDisplayName(dock) }}</span>
+                    </div>
+                    <span class="dock-status" :class="{ online: dock.is_online }">
+                      {{ dock.is_online ? '在线' : '离线' }}
+                    </span>
                   </div>
-                  <div class="position-row">
-                    <span class="position-label">坐标</span>
-                    <span class="position-value">{{ formatPositionCoords(pos) }}</span>
+                  <div class="dock-item-meta">
+                    <span class="dock-sn">SN {{ dock.dock_sn || '--' }}</span>
+                    <span v-if="dock.drone_sn" class="drone-sn">无人机 {{ dock.drone_sn }}</span>
+                    <span class="drone-state" :class="{ working: isDroneWorking(dock) }">
+                      {{ getDroneStateLabel(dock) }}
+                    </span>
                   </div>
-                  <div class="position-row">
-                    <span class="position-label">高度</span>
-                    <span class="position-value">{{ formatPositionAltitude(pos) }}</span>
+                </li>
+              </ul>
+
+              <div class="dock-latest">
+                <div class="dock-latest-header">
+                  <span class="dock-latest-title">最新位置</span>
+                  <div class="dock-latest-tags" v-if="selectedDock">
+                    <span v-if="selectedDock?.drone_sn" class="dock-latest-sn">{{ selectedDock.drone_sn }}</span>
+                    <span class="dock-latest-state" :class="{ working: isDroneWorking(selectedDock) }">
+                      {{ getDroneStateLabel(selectedDock) }}
+                    </span>
                   </div>
-                  <div v-if="pos.battery_percent !== null && pos.battery_percent !== undefined" class="position-row">
-                    <span class="position-label">电量</span>
-                    <span class="position-value">{{ pos.battery_percent }}%</span>
+                </div>
+                <div v-if="!selectedDock" class="panel-placeholder small">请选择机场</div>
+                <div v-else-if="!selectedDock.drone_sn" class="panel-placeholder small">该机场未绑定无人机</div>
+                <div v-else-if="positionLoading && latestPositions.length === 0" class="panel-placeholder small">读取中...</div>
+                <div v-else-if="latestPositions.length === 0" class="panel-placeholder small">暂无位置数据</div>
+                <div v-else class="position-list">
+                  <div
+                      v-for="(pos, index) in latestPositions"
+                      :key="pos.id || pos.timestamp || index"
+                      class="position-item"
+                  >
+                    <div class="position-row">
+                      <span class="position-label">时间</span>
+                      <span class="position-value">{{ formatPositionTime(pos.timestamp || pos.created_at) }}</span>
+                    </div>
+                    <div class="position-row">
+                      <span class="position-label">坐标</span>
+                      <span class="position-value">{{ formatPositionCoords(pos) }}</span>
+                    </div>
+                    <div class="position-row">
+                      <span class="position-label">高度</span>
+                      <span class="position-value">{{ formatPositionAltitude(pos) }}</span>
+                    </div>
+                    <div v-if="pos.battery_percent !== null && pos.battery_percent !== undefined" class="position-row">
+                      <span class="position-label">电量</span>
+                      <span class="position-value">{{ pos.battery_percent }}%</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+          <div class="panel-section alarm-panel">
+            <div class="panel-body alarm-panel-body">
+              <AlarmPanel
+                  v-if="selectedWayline"
+                  :alarms="getFilteredAlarms()"
+                  :loading="loadingAlarms"
+                  @refresh="handleAlarmRefresh"
+                  @view-detail="handleViewAlarmDetail"
+                  @process-alarm="handleProcessAlarm"
+                  @locate-alarm="handleLocateAlarm"
+              />
+              <div v-else class="dji-placeholder">
+                <p>请先选择航线查看告警信息</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="panel-section alarm-panel">
-          <div class="panel-body alarm-panel-body">
-            <AlarmPanel
+        <div class="panel-group analysis-panel-group" v-show="currentMode === 'analysis'">
+          <div class="panel-section analysis-filter-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">检测类型</h3>
+            </div>
+            <div class="panel-body analysis-filter-body">
+              <div class="detect-type-grid">
+                <button
+                  v-for="type in detectTypes"
+                  :key="type.code"
+                  class="detect-type-item"
+                  :class="{ active: selectedDetectType?.code === type.code }"
+                  @click="handleDetectTypeSelect(type)"
+                >
+                  <span class="detect-type-name">{{ type.name }}</span>
+                  <span class="detect-type-code">{{ type.code }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-section analysis-wayline-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">航线列表</h3>
+              <button
+                class="panel-action"
+                :disabled="analysisWaylineLoading || !selectedDetectType"
+                @click="loadAnalysisWaylines"
+              >
+                {{ analysisWaylineLoading ? '加载中...' : '刷新' }}
+              </button>
+            </div>
+            <div class="panel-body analysis-wayline-body">
+              <div v-if="!selectedDetectType" class="panel-placeholder">请选择检测类型</div>
+              <div v-else-if="analysisWaylineLoading && analysisWaylines.length === 0" class="panel-placeholder">正在加载航线...</div>
+              <div v-else-if="analysisWaylineError" class="panel-placeholder error">{{ analysisWaylineError }}</div>
+              <div v-else-if="analysisWaylines.length === 0" class="panel-placeholder">暂无航线数据</div>
+              <ul v-else class="analysis-wayline-list">
+                <li
+                  v-for="wayline in analysisWaylines"
+                  :key="wayline.id || wayline.wayline_id"
+                  class="analysis-wayline-item"
+                  :class="{ active: isAnalysisWaylineSelected(wayline) }"
+                  @click="handleAnalysisWaylineSelected(wayline)"
+                >
+                  <div class="analysis-wayline-title">{{ wayline.name || wayline.wayline_name || '未命名航线' }}</div>
+                  <div class="analysis-wayline-meta">
+                    <span class="analysis-wayline-id">ID {{ wayline.wayline_id || wayline.id || '--' }}</span>
+                    <span class="analysis-wayline-type">{{ getDetectTypeLabel(wayline.detect_type) }}</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="panel-section analysis-alarm-panel">
+            <div class="panel-body alarm-panel-body">
+              <AlarmPanel
                 v-if="selectedWayline"
                 :alarms="getFilteredAlarms()"
                 :loading="loadingAlarms"
@@ -109,18 +196,18 @@
                 @view-detail="handleViewAlarmDetail"
                 @process-alarm="handleProcessAlarm"
                 @locate-alarm="handleLocateAlarm"
-            />
-            <div v-else class="dji-placeholder">
-              <p>请先选择航线查看告警信息</p>
+              />
+              <div v-else class="dji-placeholder">
+                <p>请先选择航线查看告警信息</p>
+              </div>
             </div>
           </div>
         </div>
-
       </div>
 
       <!-- 中间区域 - 3D视图和直播 -->
       <div class="main-view">
-        <div class="viewer-grid">
+        <div class="viewer-grid" :class="{ 'analysis-mode': currentMode === 'analysis' }">
         <!-- Cesium 3D视图 -->
         <div class="cesium-section">
           <div class="cesium-controls">
@@ -166,7 +253,7 @@
           </div>
         </div>
         <!-- 实时监控面板（直播流播放器） -->
-        <div class="panel-section live-monitor-section">
+        <div class="panel-section live-monitor-section" v-show="currentMode === 'monitor'">
           <div class="monitor-header">
             <span class="monitor-title">实时直播</span>
             <div class="monitor-actions">
@@ -323,6 +410,11 @@ export default {
         { name: '桥梁', code: 'bridge', icon: '🌉', keywords: 'bridge, 桥梁' },
         { name: '保护区', code: 'protected_area', icon: '🛡️', keywords: 'protected_area, 保护区' }
       ],
+      currentMode: 'monitor',
+      selectedDetectType: null,
+      analysisWaylines: [],
+      analysisWaylineLoading: false,
+      analysisWaylineError: '',
       loading: false,
       error: '',
       globeVisible: true,
@@ -375,6 +467,7 @@ export default {
       return this.selectedDock?.display_name || this.selectedDock?.dock_name || this.selectedDock?.dock_sn || ''
     },
     showCreateTaskButton() {
+      if (this.currentMode !== 'monitor') return false
       if (this.loading || this.error) return false
       if (!this.selectedDock || !this.selectedDockSn) return false
       return this.selectedDock.drone_in_dock === 1 || this.selectedDock.drone_in_dock === '1'
@@ -407,6 +500,7 @@ export default {
     this.droneEntity = null
     this.lastDroneCartesian = null
     this.invertedTriangleImage = null
+    this.alertTriangleIconCache = {}
     this.alarmEntities = []
     this.actionDetailEntities = []
     this.pickHandler = null
@@ -560,6 +654,9 @@ export default {
       let validPoints = []
       try {
         const res = await waylineApi.getWaylineActionDetails(wayline.id)
+        if (!this.selectedWayline || String(this.selectedWayline.id) !== String(wayline.id)) {
+          return
+        }
         this.actionDetails = Array.isArray(res?.action_details) ? res.action_details : []
         validPoints = this.actionDetails
 
@@ -576,6 +673,9 @@ export default {
 // 核心数据解析：增加去重逻辑，防止 NaN
 // 修改函数签名，增加 fallbackData 参数
     async ensureWaylineWithPoints(wayline, fallbackData = []) {
+      if (!this.selectedWayline || String(this.selectedWayline.id) !== String(wayline?.id)) {
+        return
+      }
       console.log('----------------------------------------------------');
       console.log('[Debug] 开始构建航线，WaylineID:', wayline?.id);
 
@@ -602,20 +702,10 @@ export default {
 
       const mappedPoints = [];
       sourceList.forEach((p, i) => {
-        // 暴力匹配所有可能的字段名
-        const lon = this.toNumber(p.lon ?? p.longitude ?? p.long ?? p.x);
-        const lat = this.toNumber(p.lat ?? p.latitude ?? p.y);
-        const alt = this.getActionDetailAltitude(p);
-        const safeAlt = Number.isFinite(alt) ? alt : 0;
+        const payload = this.getWaylinePointPayload(p);
 
-        if (Number.isFinite(lon) && Number.isFinite(lat)) {
-          mappedPoints.push({
-            longitude: lon,
-            latitude: lat,
-            altitude: safeAlt,
-            heading: Number(p.aircraft_heading || p.heading || 0),
-            gimbalPitch: Number(p.gimbal_pitch || 0)
-          });
+        if (Number.isFinite(payload.longitude) && Number.isFinite(payload.latitude)) {
+          mappedPoints.push(payload);
         } else {
           if (i === 0) console.warn('[Debug] 第一条数据解析失败，字段不匹配:', p);
         }
@@ -700,11 +790,15 @@ export default {
       }
 
       // 4. 视角飞向整个航线范围
-      const sphere = Cesium.BoundingSphere.fromPoints(positions);
-      this.viewer.camera.flyToBoundingSphere(sphere, {
-        duration: 1.0,
-        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), sphere.radius * 2.5)
-      });
+      if (this.currentMode === 'analysis') {
+        this.focusOnWayline();
+      } else {
+        const sphere = Cesium.BoundingSphere.fromPoints(positions);
+        this.viewer.camera.flyToBoundingSphere(sphere, {
+          duration: 1.0,
+          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), sphere.radius * 2.5)
+        });
+      }
     },
 
     // 安全的计算朝向函数，处理重合点
@@ -993,6 +1087,86 @@ export default {
       if (this.viewer) {
         this.viewer.scene.globe.show = this.globeVisible;
       }
+    },
+    setMode(mode) {
+      if (!mode || this.currentMode === mode) return;
+      this.clearDigitalTwinAndAlarms();
+      this.currentMode = mode;
+      if (this.viewer) {
+        this.viewer.trackedEntity = undefined;
+      }
+      if (mode === 'analysis') {
+        return;
+      }
+      this.applyCameraMode(true);
+    },
+    setDroneVisibility(visible) {
+      if (this.droneEntity) {
+        this.droneEntity.show = Boolean(visible);
+      }
+    },
+    setActionDetailVisibility(visible) {
+      if (!this.actionDetailEntities.length) return;
+      const show = Boolean(visible);
+      this.actionDetailEntities.forEach(entity => {
+        entity.show = show;
+      });
+    },
+    handleDetectTypeSelect(type) {
+      if (!type) return;
+      if (this.selectedDetectType?.code === type.code) return;
+      this.selectedDetectType = type;
+      this.analysisWaylines = [];
+      this.analysisWaylineError = '';
+      this.loadAnalysisWaylines();
+    },
+    async loadAnalysisWaylines() {
+      if (!this.selectedDetectType?.code || this.analysisWaylineLoading) return;
+      this.analysisWaylineLoading = true;
+      this.analysisWaylineError = '';
+      try {
+        const response = await waylineApi.getWaylines({ detect_type: this.selectedDetectType.code });
+        this.analysisWaylines = Array.isArray(response) ? response : (response.results || response.data || []);
+      } catch (error) {
+        console.error('获取航线列表失败:', error);
+        this.analysisWaylines = [];
+        this.analysisWaylineError = '航线列表加载失败';
+      } finally {
+        this.analysisWaylineLoading = false;
+      }
+    },
+    async handleAnalysisWaylineSelected(wayline) {
+      if (!wayline) return;
+      let target = wayline;
+      if (!target.id && target.wayline_id) {
+        try {
+          const response = await waylineApi.getWaylines({ wayline_id: target.wayline_id });
+          const list = Array.isArray(response) ? response : (response.results || response.data || []);
+          if (list.length) {
+            target = list[0];
+          }
+        } catch (error) {
+          console.warn('获取航线详情失败:', error);
+        }
+      }
+      await this.applyWaylineSelection(target);
+    },
+    isAnalysisWaylineSelected(wayline) {
+      if (!this.selectedWayline || !wayline) return false;
+      const selectedId = this.selectedWayline?.id ? String(this.selectedWayline.id) : '';
+      const selectedWaylineId = this.selectedWayline?.wayline_id ? String(this.selectedWayline.wayline_id) : '';
+      const candidateId = wayline?.id ? String(wayline.id) : '';
+      const candidateWaylineId = wayline?.wayline_id ? String(wayline.wayline_id) : '';
+      return Boolean(
+        (selectedId && candidateId && selectedId === candidateId) ||
+        (selectedWaylineId && candidateWaylineId && selectedWaylineId === candidateWaylineId)
+      );
+    },
+    getDetectTypeLabel(code) {
+      if (!code) return '--';
+      const normalized = String(code).toLowerCase();
+      const match = this.detectTypes.find(item => item.code === normalized);
+      return match ? match.name : code;
     },
 
     handleViewAlarmDetail(alarm) {
@@ -1300,6 +1474,10 @@ export default {
     },
 
     updateDigitalTwinFromPositions(positions) {
+      if (this.currentMode === 'analysis') {
+        this.setDroneVisibility(false)
+        return
+      }
       const latestPosition = Array.isArray(positions) ? positions[0] : null
       if (latestPosition) {
         this.updateDroneEntityFromPosition(latestPosition)
@@ -1673,6 +1851,9 @@ export default {
       this.loadingAlarms = true;
       try {
         const response = await alarmApi.getAlarms({ wayline: waylineId });
+        if (!this.selectedWayline || String(this.selectedWayline.id) !== String(waylineId)) {
+          return;
+        }
         this.alarms = Array.isArray(response) ? response : (response.results || []);
         this.plotAlarmMarkers(this.alarms);
       } catch (error) {
@@ -1715,6 +1896,9 @@ export default {
     async fetchActionDetails(waylineId) {
       try {
         const res = await waylineApi.getWaylineActionDetails(waylineId);
+        if (!this.selectedWayline || String(this.selectedWayline.id) !== String(waylineId)) {
+          return;
+        }
         this.actionDetails = Array.isArray(res?.action_details) ? res.action_details : [];
         this.plotActionDetailMarkers(this.actionDetails);
       } catch (e) {
@@ -1730,15 +1914,12 @@ export default {
       this.clearActionDetailMarkers();
       const rawPoints = [];
       details.forEach(d => {
-        const lat = this.toNumber(d.lat);
-        const lon = this.toNumber(d.lon);
-        const h = this.getActionDetailAltitude(d);
-        const safeHeight = Number.isFinite(h) ? h : 0;
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const payload = this.getWaylinePointPayload(d);
+        if (!Number.isFinite(payload.latitude) || !Number.isFinite(payload.longitude)) return;
         rawPoints.push({
-          longitude: lon,
-          latitude: lat,
-          altitude: safeHeight
+          longitude: payload.longitude,
+          latitude: payload.latitude,
+          altitude: payload.altitude
         });
       });
 
@@ -1826,6 +2007,43 @@ export default {
       this.invertedTriangleImage = canvas;
       return canvas;
     },
+    getAlertTriangleIcon(size = 28) {
+      if (!size || typeof document === 'undefined') return null;
+      if (!this.alertTriangleIconCache) {
+        this.alertTriangleIconCache = {};
+      }
+      const key = String(size);
+      if (this.alertTriangleIconCache[key]) return this.alertTriangleIconCache[key];
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      const padding = Math.max(2, Math.round(size * 0.08));
+      const topY = padding;
+      const leftX = padding;
+      const rightX = size - padding;
+      const bottomY = size - padding;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.moveTo(size / 2, topY);
+      ctx.lineTo(rightX, bottomY);
+      ctx.lineTo(leftX, bottomY);
+      ctx.closePath();
+      ctx.fillStyle = '#ef4444';
+      ctx.fill();
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(2, Math.round(size * 0.1));
+      ctx.strokeStyle = '#0b0b0b';
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.round(size * 0.55)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('!', size / 2, size * 0.6);
+      this.alertTriangleIconCache[key] = canvas;
+      return canvas;
+    },
     getActionDetailAltitude(detail) {
       const candidates = [
         detail?.height,
@@ -1840,6 +2058,19 @@ export default {
         }
       }
       return NaN;
+    },
+    getWaylinePointPayload(point) {
+      const longitude = this.toNumber(point?.lon ?? point?.longitude ?? point?.long ?? point?.x);
+      const latitude = this.toNumber(point?.lat ?? point?.latitude ?? point?.y);
+      const altitude = this.getActionDetailAltitude(point);
+      const safeAltitude = Number.isFinite(altitude) ? altitude : 0;
+      return {
+        longitude,
+        latitude,
+        altitude: safeAltitude,
+        heading: Number(point?.aircraft_heading || point?.heading || 0),
+        gimbalPitch: Number(point?.gimbal_pitch || 0)
+      };
     },
     mergeCloseWaypoints(points, thresholdMeters = 0.5) {
       if (!Array.isArray(points) || points.length === 0) return [];
@@ -1892,14 +2123,12 @@ export default {
     },
 
     handleLocateAlarm(alarm) {
-      const lat = this.toNumber(alarm?.latitude);
-      const lon = this.toNumber(alarm?.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !this.viewer) return;
+      const { latitude, longitude, altitude } = this.getAlarmPosition(alarm);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !this.viewer) return;
       const Cesium = this.cesiumLib || window.Cesium;
       if (!Cesium) return;
-      const height = this.getAlarmAltitude(alarm);
-      const safeHeight = Number.isFinite(height) ? height : 200;
-      const destination = Cesium.Cartesian3.fromDegrees(lon, lat, safeHeight);
+      const safeHeight = Number.isFinite(altitude) ? altitude : 200;
+      const destination = Cesium.Cartesian3.fromDegrees(longitude, latitude, safeHeight);
       this.viewer.camera.flyTo({
         destination,
         orientation: {
@@ -1916,39 +2145,31 @@ export default {
       if (!Cesium) return;
       this.clearAlarmMarkers();
       const entities = [];
-      const pinBuilder = (Cesium.PinBuilder) ? new Cesium.PinBuilder() : null;
-      const pinCanvas = pinBuilder ? pinBuilder.fromColor(Cesium.Color.ORANGE, 32) : null;
+      const triangleSize = 32;
+      const triangleImage = this.getAlertTriangleIcon(triangleSize);
       alarms.forEach(alarm => {
-        const lat = this.toNumber(alarm.latitude);
-        const lon = this.toNumber(alarm.longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-        const altitude = this.getAlarmAltitude(alarm);
-        const position = Cesium.Cartesian3.fromDegrees(lon, lat, Number.isFinite(altitude) ? altitude : 0);
+        const { latitude, longitude, altitude } = this.getAlarmPosition(alarm);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+        const position = Cesium.Cartesian3.fromDegrees(
+          longitude,
+          latitude,
+          Number.isFinite(altitude) ? altitude : 0
+        );
         const entity = this.viewer.entities.add({
           position,
           alarmData: alarm,
-          point: {
-            pixelSize: 12,
-            color: Cesium.Color.ORANGE.withAlpha(0.95),
-            outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 2,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY
-          },
-          billboard: {
-            image: pinCanvas || undefined,
-            width: 32,
-            height: 32,
+          billboard: triangleImage ? {
+            image: triangleImage,
+            width: triangleSize,
+            height: triangleSize,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             disableDepthTestDistance: Number.POSITIVE_INFINITY
-          },
-          label: {
-            text: alarm.id ? String(alarm.id) : '报警',
-            font: '14px sans-serif',
-            fillColor: Cesium.Color.WHITE,
+          } : undefined,
+          point: triangleImage ? undefined : {
+            pixelSize: 10,
+            color: Cesium.Color.RED.withAlpha(0.95),
             outlineColor: Cesium.Color.BLACK,
             outlineWidth: 2,
-            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            pixelOffset: new Cesium.Cartesian2(0, -28),
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         });
@@ -2034,6 +2255,51 @@ export default {
         }
       }
       return NaN;
+    },
+    getAlarmPosition(alarm) {
+      const latitudeCandidates = [
+        alarm?.latitude,
+        alarm?.lat,
+        alarm?.y,
+        alarm?.location?.latitude,
+        alarm?.location?.lat,
+        alarm?.position?.latitude,
+        alarm?.position?.lat
+      ];
+      const longitudeCandidates = [
+        alarm?.longitude,
+        alarm?.lon,
+        alarm?.lng,
+        alarm?.long,
+        alarm?.x,
+        alarm?.location?.longitude,
+        alarm?.location?.lon,
+        alarm?.location?.lng,
+        alarm?.position?.longitude,
+        alarm?.position?.lon,
+        alarm?.position?.lng
+      ];
+      let latitude = NaN;
+      let longitude = NaN;
+      for (const candidate of latitudeCandidates) {
+        const value = this.toNumber(candidate);
+        if (Number.isFinite(value)) {
+          latitude = value;
+          break;
+        }
+      }
+      for (const candidate of longitudeCandidates) {
+        const value = this.toNumber(candidate);
+        if (Number.isFinite(value)) {
+          longitude = value;
+          break;
+        }
+      }
+      return {
+        latitude,
+        longitude,
+        altitude: this.getAlarmAltitude(alarm)
+      };
     }
   }
 }
@@ -2059,6 +2325,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 20px;
+  flex-wrap: wrap;
   padding: 24px 32px;
   background: rgba(26, 31, 58, 0.6);
   backdrop-filter: blur(10px);
@@ -2182,6 +2449,42 @@ export default {
   margin: 0;
 }
 
+.mode-switch {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(10, 14, 39, 0.6);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.mode-tab {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.7);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.mode-tab:hover {
+  border-color: rgba(0, 212, 255, 0.5);
+  color: #e2e8f0;
+}
+
+.mode-tab.active {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.35), rgba(0, 153, 255, 0.45));
+  border-color: rgba(0, 212, 255, 0.7);
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(0, 212, 255, 0.25);
+}
+
 /* 主内容区 */
 .dashboard-content {
   flex: 1;
@@ -2196,6 +2499,15 @@ export default {
 
 /* 侧边面板 */
 .side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.panel-group {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -2486,6 +2798,119 @@ export default {
   height: 360px;
 }
 
+.analysis-filter-body {
+  padding: 12px;
+}
+
+.detect-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detect-type-item {
+  padding: 12px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(11, 16, 36, 0.6);
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.detect-type-item:hover {
+  border-color: rgba(0, 212, 255, 0.5);
+  background: rgba(15, 23, 42, 0.75);
+}
+
+.detect-type-item.active {
+  border-color: rgba(0, 212, 255, 0.8);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.2);
+  color: #e2e8f0;
+}
+
+.detect-type-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detect-type-code {
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.analysis-wayline-panel {
+  flex: 0 0 auto;
+}
+
+.analysis-wayline-body {
+  padding: 12px;
+  overflow: auto;
+  max-height: 320px;
+}
+
+.analysis-wayline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.analysis-wayline-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(11, 16, 36, 0.6);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.analysis-wayline-item:hover {
+  border-color: rgba(0, 212, 255, 0.45);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.analysis-wayline-item.active {
+  border-color: rgba(0, 212, 255, 0.7);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.2);
+}
+
+.analysis-wayline-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 6px;
+}
+
+.analysis-wayline-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.analysis-wayline-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.analysis-wayline-type {
+  color: #7dd3fc;
+}
+
+.analysis-alarm-panel {
+  flex: 0 0 360px;
+  height: 360px;
+}
+
 .alarm-panel-body {
   flex: 1 1 auto;
   height: 100%;
@@ -2532,6 +2957,10 @@ export default {
   height: 100%;
   min-height: 0;
   flex: 1;
+}
+
+.viewer-grid.analysis-mode {
+  grid-template-columns: 1fr;
 }
 
 .cesium-section {
@@ -2931,6 +3360,21 @@ export default {
     grid-template-columns: 1fr;
     grid-template-rows: auto;
     height: auto;
+  }
+
+  .mode-switch {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .panel-group {
+    height: auto;
+    overflow: visible;
+  }
+
+  .analysis-wayline-body {
+    max-height: none;
   }
 
   .side-panel {
