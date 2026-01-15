@@ -20,7 +20,7 @@
         <option value="IGNORED">已忽略</option>
       </select>
 
-      <select v-model="detectTypeFilter" @change="loadAlarms" class="filter-select">
+      <select v-model="detectTypeFilter" @change="handleDetectTypeChange" class="filter-select">
         <option value="">全部检测类型</option>
         <option value="rail">铁路</option>
         <option value="contactline">接触网</option>
@@ -30,7 +30,7 @@
 
       <select v-model="waylineIdFilter" @change="loadAlarms" class="filter-select">
         <option value="">全部航线</option>
-        <option v-for="wayline in waylines" :key="wayline.id" :value="wayline.wayline_id">
+        <option v-for="wayline in filteredWaylines" :key="wayline.id" :value="wayline.wayline_id">
           {{ wayline.name }}
         </option>
       </select>
@@ -258,7 +258,22 @@ export default {
     this.loadAlarms()
     this.loadWaylines()
   },
+  computed: {
+    filteredWaylines() {
+      if (!this.detectTypeFilter) {
+        return this.waylines
+      }
+      return this.waylines.filter(wayline => 
+        (wayline.detect_type || '').toLowerCase() === this.detectTypeFilter.toLowerCase()
+      )
+    }
+  },
   methods: {
+    handleDetectTypeChange() {
+      this.waylineIdFilter = ''
+      this.currentPage = 1
+      this.loadAlarms()
+    },
     async loadAlarms() {
       this.loading = true
       try {
