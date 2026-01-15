@@ -160,114 +160,118 @@
     </div>
     
     <!-- 父任务详情对话框 -->
-    <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
-      <div class="modal-premium detail-modal">
-        <div class="modal-header">
-          <h3 class="modal-title">父任务详情</h3>
-          <button @click="showDetailDialog = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="detail-grid">
-            <div class="detail-item">
-              <span class="detail-label">任务ID</span>
-              <span class="detail-value">{{ currentTask?.id }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">外部任务ID</span>
-              <span class="detail-value">{{ currentTask?.external_task_id || '--' }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">检测类型</span>
-              <span class="detail-value">--（父任务无检测类型）</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">航线</span>
-              <span class="detail-value">--（父任务无航线）</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">创建时间</span>
-              <span class="detail-value">{{ formatDate(currentTask?.created_at) }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">检测状态</span>
-              <span class="status-badge" :class="`status-${currentTask?.detect_status}`">
-                {{ getStatusText(currentTask?.detect_status) }}
-              </span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">媒体清理状态</span>
-              <span class="clean-badge" :class="currentTask?.is_cleaned ? 'cleaned' : 'not-cleaned'">
-                {{ currentTask?.is_cleaned ? '已清理' : '未清理' }}
-              </span>
+    <Teleport to="body">
+      <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
+        <div class="modal-premium detail-modal">
+          <div class="modal-header">
+            <h3 class="modal-title">父任务详情</h3>
+            <button @click="showDetailDialog = false" class="modal-close">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-label">任务ID</span>
+                <span class="detail-value">{{ currentTask?.id }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">外部任务ID</span>
+                <span class="detail-value">{{ currentTask?.external_task_id || '--' }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">检测类型</span>
+                <span class="detail-value">--（父任务无检测类型）</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">航线</span>
+                <span class="detail-value">--（父任务无航线）</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">创建时间</span>
+                <span class="detail-value">{{ formatDate(currentTask?.created_at) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">检测状态</span>
+                <span class="status-badge" :class="`status-${currentTask?.detect_status}`">
+                  {{ getStatusText(currentTask?.detect_status) }}
+                </span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">媒体清理状态</span>
+                <span class="clean-badge" :class="currentTask?.is_cleaned ? 'cleaned' : 'not-cleaned'">
+                  {{ currentTask?.is_cleaned ? '已清理' : '未清理' }}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="showDetailDialog = false" class="modal-btn secondary-btn">关闭</button>
+          <div class="modal-footer">
+            <button @click="showDetailDialog = false" class="modal-btn secondary-btn">关闭</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
     <!-- 子任务对话框 -->
-    <div v-if="showSubTaskDialog" class="modal-overlay" @click.self="showSubTaskDialog = false">
-      <div class="modal-premium detail-modal">
-        <div class="modal-header">
-          <h3 class="modal-title">子任务列表 - 父任务 {{ currentTask?.external_task_id || currentTask?.id }}</h3>
-          <button @click="showSubTaskDialog = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body subtask-body">
-          <div v-if="!subTasks.length" class="empty-row">暂无子任务</div>
-          <table v-else class="task-table subtask-table">
-            <thead>
-              <tr>
-                <th width="80">ID</th>
-                <th width="180">外部任务ID / 文件夹</th>
-                <th width="120">执行设备</th> <!-- 🔥 新增 -->
-                <th width="140">航线名称</th>
-                <th width="120">检测类型</th>
-                <th width="160">开始时间</th>
-                <th width="160">完成时间</th>
-                <th width="100">状态</th>
-                <th width="120">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in subTasks" :key="item.id" class="task-row">
-                <td><span class="id-badge">{{ item.id }}</span></td>
-                <td>{{ item.external_task_id || '--' }}</td>
-                <td><span class="device-badge">{{ item.device_sn || '--' }}</span></td> <!-- 🔥 新增 -->
-                <td>{{ item.wayline_details?.name || '--' }}</td>
-                <td>
-                  <span class="category-badge">
-                    {{ item.detect_category_name || '未设置' }}
-                  </span>
-                </td>
-                <td><span class="datetime-text">{{ formatDate(item.started_at) }}</span></td>
-                <td><span class="datetime-text">{{ formatDate(item.finished_at) }}</span></td>
-                <td>
-                  <span class="status-badge" :class="`status-${item.detect_status}`">
-                    {{ getStatusText(item.detect_status) }}
-                  </span>
-                </td>
-                <td>
-                  <button 
-                    v-if="item.detect_status === 'done'"
-                    @click="playbackSubTask(item)" 
-                    class="action-btn playback-btn"
-                  >
-                    回放
-                  </button>
-                  <span v-else class="text-muted">未完成</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="modal-footer">
-          <button @click="showSubTaskDialog = false" class="modal-btn secondary-btn">关闭</button>
+    <Teleport to="body">
+      <div v-if="showSubTaskDialog" class="modal-overlay" @click.self="showSubTaskDialog = false">
+        <div class="modal-premium detail-modal">
+          <div class="modal-header">
+            <h3 class="modal-title">子任务列表 - 父任务 {{ currentTask?.external_task_id || currentTask?.id }}</h3>
+            <button @click="showSubTaskDialog = false" class="modal-close">×</button>
+          </div>
+          <div class="modal-body subtask-body">
+            <div v-if="!subTasks.length" class="empty-row">暂无子任务</div>
+            <table v-else class="task-table subtask-table">
+              <thead>
+                <tr>
+                  <th width="80">ID</th>
+                  <th width="180">外部任务ID / 文件夹</th>
+                  <th width="120">执行设备</th> <!-- 🔥 新增 -->
+                  <th width="140">航线名称</th>
+                  <th width="120">检测类型</th>
+                  <th width="160">开始时间</th>
+                  <th width="160">完成时间</th>
+                  <th width="100">状态</th>
+                  <th width="120">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in subTasks" :key="item.id" class="task-row">
+                  <td><span class="id-badge">{{ item.id }}</span></td>
+                  <td>{{ item.external_task_id || '--' }}</td>
+                  <td><span class="device-badge">{{ item.device_sn || '--' }}</span></td> <!-- 🔥 新增 -->
+                  <td>{{ item.wayline_details?.name || '--' }}</td>
+                  <td>
+                    <span class="category-badge">
+                      {{ item.detect_category_name || '未设置' }}
+                    </span>
+                  </td>
+                  <td><span class="datetime-text">{{ formatDate(item.started_at) }}</span></td>
+                  <td><span class="datetime-text">{{ formatDate(item.finished_at) }}</span></td>
+                  <td>
+                    <span class="status-badge" :class="`status-${item.detect_status}`">
+                      {{ getStatusText(item.detect_status) }}
+                    </span>
+                  </td>
+                  <td>
+                    <button 
+                      v-if="item.detect_status === 'done'"
+                      @click="playbackSubTask(item)" 
+                      class="action-btn playback-btn"
+                    >
+                      回放
+                    </button>
+                    <span v-else class="text-muted">未完成</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="modal-footer">
+            <button @click="showSubTaskDialog = false" class="modal-btn secondary-btn">关闭</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 

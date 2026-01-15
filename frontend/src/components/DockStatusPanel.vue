@@ -347,6 +347,15 @@ export default {
           dockStatusApi.getDockStatistics()
         ])
 
+        // 按 dock_sn 排序，防止列表跳动
+        if (docksData && Array.isArray(docksData)) {
+          docksData.sort((a, b) => {
+            const snA = a.dock_sn || ''
+            const snB = b.dock_sn || ''
+            return snA.localeCompare(snB)
+          })
+        }
+
         this.docks = docksData || []
         this.statistics = statsData || this.statistics
         this.updateTime()

@@ -447,7 +447,18 @@ initCesiumMap() {
       this.errors.dock = ''
       try {
         this.dockSummary = await homeDashboardApi.getDockSummary()
-        this.docks = await dockStatusApi.getAllDocks()
+        const docksData = await dockStatusApi.getAllDocks()
+
+        // 按 dock_sn 排序，防止列表跳动
+        if (docksData && Array.isArray(docksData)) {
+          docksData.sort((a, b) => {
+            const snA = a.dock_sn || ''
+            const snB = b.dock_sn || ''
+            return snA.localeCompare(snB)
+          })
+        }
+
+        this.docks = docksData || []
       } catch (e) {
         this.dockSummary = null
         this.errors.dock = this.getErrMsg(e, '加载机场信息失败')

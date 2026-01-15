@@ -130,98 +130,102 @@
     </div>
     
     <!-- 状态更新对话框 -->
-    <div v-if="showStatusDialog" class="modal-overlay" @click.self="showStatusDialog = false">
-      <div class="modal-premium">
-        <div class="modal-header">
-          <h3 class="modal-title">更新告警状态</h3>
-          <button @click="showStatusDialog = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="info-row">
-            <span class="info-label">告警ID:</span>
-            <span class="info-value">{{ currentAlarm?.id }}</span>
+    <Teleport to="body">
+      <div v-if="showStatusDialog" class="modal-overlay" @click.self="showStatusDialog = false">
+        <div class="modal-premium">
+          <div class="modal-header">
+            <h3 class="modal-title">更新告警状态</h3>
+            <button @click="showStatusDialog = false" class="modal-close">×</button>
           </div>
-          <div class="info-row">
-            <span class="info-label">告警描述:</span>
-            <span class="info-value">{{ currentAlarm?.content }}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">当前状态:</span>
-            <span class="status-badge" :class="`status-${currentAlarm?.status.toLowerCase()}`">
-              {{ getStatusText(currentAlarm?.status) }}
-            </span>
-          </div>
-          <div class="form-group">
-            <label class="form-label">更新为</label>
-            <select v-model="newAlarmStatus" class="form-select">
-              <option value="PENDING">待处理</option>
-              <option value="PROCESSING">处理中</option>
-              <option value="COMPLETED">已完成</option>
-              <option value="IGNORED">已忽略</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="showStatusDialog = false" class="modal-btn secondary-btn">取消</button>
-          <button @click="confirmStatusUpdate" class="modal-btn primary-btn">确定</button>
-        </div>
-      </div>
-    </div>
-    
-    <!-- 详情对话框 -->
-    <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
-      <div class="modal-premium detail-modal">
-        <div class="modal-header">
-          <h3 class="modal-title">告警详情</h3>
-          <button @click="showDetailDialog = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="detail-grid">
-            <div class="detail-item">
-              <span class="detail-label">告警ID</span>
-              <span class="detail-value">{{ currentAlarm?.id }}</span>
+          <div class="modal-body">
+            <div class="info-row">
+              <span class="info-label">告警ID:</span>
+              <span class="info-value">{{ currentAlarm?.id }}</span>
             </div>
-            <div class="detail-item">
-              <span class="detail-label">告警类型</span>
-              <span class="category-badge" :class="getCategoryClass(currentAlarm?.category_name)">
-                {{ currentAlarm?.category_name || '未分类' }}
-              </span>
+            <div class="info-row">
+              <span class="info-label">告警描述:</span>
+              <span class="info-value">{{ currentAlarm?.content }}</span>
             </div>
-            <div class="detail-item full-width">
-              <span class="detail-label">告警描述</span>
-              <span class="detail-value">{{ currentAlarm?.content }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">报警位置</span>
-              <span class="detail-value">坐标({{ currentAlarm?.latitude }}, {{ currentAlarm?.longitude }})</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">报警时间</span>
-              <span class="detail-value">{{ formatDate(currentAlarm?.created_at) }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">告警状态</span>
+            <div class="info-row">
+              <span class="info-label">当前状态:</span>
               <span class="status-badge" :class="`status-${currentAlarm?.status.toLowerCase()}`">
                 {{ getStatusText(currentAlarm?.status) }}
               </span>
             </div>
-            <div class="detail-item">
-              <span class="detail-label">航线信息</span>
-              <span class="detail-value">{{ getWaylineName(currentAlarm) }} ({{ getWaylineId(currentAlarm) }})</span>
+            <div class="form-group">
+              <label class="form-label">更新为</label>
+              <select v-model="newAlarmStatus" class="form-select">
+                <option value="PENDING">待处理</option>
+                <option value="PROCESSING">处理中</option>
+                <option value="COMPLETED">已完成</option>
+                <option value="IGNORED">已忽略</option>
+              </select>
             </div>
-            <div v-if="currentAlarm?.image_url" class="detail-item full-width">
-              <span class="detail-label">报警图片</span>
-              <div class="alarm-image">
-                <img :src="currentAlarm.image_url" alt="告警图片" />
+          </div>
+          <div class="modal-footer">
+            <button @click="showStatusDialog = false" class="modal-btn secondary-btn">取消</button>
+            <button @click="confirmStatusUpdate" class="modal-btn primary-btn">确定</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+    
+    <!-- 详情对话框 -->
+    <Teleport to="body">
+      <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
+        <div class="modal-premium detail-modal">
+          <div class="modal-header">
+            <h3 class="modal-title">告警详情</h3>
+            <button @click="showDetailDialog = false" class="modal-close">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-label">告警ID</span>
+                <span class="detail-value">{{ currentAlarm?.id }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">告警类型</span>
+                <span class="category-badge" :class="getCategoryClass(currentAlarm?.category_name)">
+                  {{ currentAlarm?.category_name || '未分类' }}
+                </span>
+              </div>
+              <div class="detail-item full-width">
+                <span class="detail-label">告警描述</span>
+                <span class="detail-value">{{ currentAlarm?.content }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">报警位置</span>
+                <span class="detail-value">坐标({{ currentAlarm?.latitude }}, {{ currentAlarm?.longitude }})</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">报警时间</span>
+                <span class="detail-value">{{ formatDate(currentAlarm?.created_at) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">告警状态</span>
+                <span class="status-badge" :class="`status-${currentAlarm?.status.toLowerCase()}`">
+                  {{ getStatusText(currentAlarm?.status) }}
+                </span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">航线信息</span>
+                <span class="detail-value">{{ getWaylineName(currentAlarm) }} ({{ getWaylineId(currentAlarm) }})</span>
+              </div>
+              <div v-if="currentAlarm?.image_url" class="detail-item full-width">
+                <span class="detail-label">报警图片</span>
+                <div class="alarm-image">
+                  <img :src="currentAlarm.image_url" alt="告警图片" />
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="showDetailDialog = false" class="modal-btn secondary-btn">关闭</button>
+          <div class="modal-footer">
+            <button @click="showDetailDialog = false" class="modal-btn secondary-btn">关闭</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 

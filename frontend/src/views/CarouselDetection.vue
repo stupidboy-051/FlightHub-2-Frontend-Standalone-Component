@@ -216,7 +216,7 @@
         <template v-else>
           <div class="card-header">
             <div>
-              <h3 class="card-title">实时检测回放</h3>
+              <h3 class="card-title">{{ isDetectMode ? '实时检测中' : '检测回放' }}</h3>
               <p class="card-subtitle">当前任务：{{ currentInspectTaskName || '未选择' }}</p>
             </div>
             <div class="legend" v-if="currentInspectTaskId">
@@ -560,7 +560,7 @@ export default {
       return this.selectedFolders.includes(taskId)
     },
 
-    async startInspectPlaybackForFolder(taskOrId, isPlaybackMode = false) {
+    async startInspectPlaybackForFolder(taskOrId, isPlaybackMode = false, forceDetectMode = false) {
       // 保存当前任务进度
       if (this.currentInspectTaskId) {
         this.taskProgressMap[this.currentInspectTaskId] = this.inspectIndex
@@ -624,7 +624,11 @@ export default {
         this.currentInspectTaskId = task.id
         this.currentInspectTaskName = task.external_task_id || `任务 ${task.id}`
         // 如果是从外部调用（回放模式），设置标记
-        if (isPlaybackMode) {
+        if (forceDetectMode) {
+          this.isDetectMode = true
+          this.taskQueue = [folderName]
+          this.currentTaskIndex = 0
+        } else if (isPlaybackMode) {
           this.isDetectMode = false
           this.taskQueue = [folderName]
           this.currentTaskIndex = 0
@@ -1621,7 +1625,7 @@ export default {
  
                   // 3. 强制自动播放 (无需点击，且抢占当前播放)
                   console.log('▶️ [Auto] 强制切换到新任务')
-                  this.startInspectPlaybackForFolder(newestGlobalTask, true)
+                  this.startInspectPlaybackForFolder(newestGlobalTask, false, true)
                }
             }
          }

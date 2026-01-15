@@ -1043,6 +1043,16 @@ export default {
       try {
         const response = await dockStatusApi.getAllDocks()
         const list = Array.isArray(response) ? response : (response.results || [])
+
+        // 按 dock_sn 排序，防止列表跳动
+        if (list && Array.isArray(list)) {
+          list.sort((a, b) => {
+            const snA = a.dock_sn || ''
+            const snB = b.dock_sn || ''
+            return snA.localeCompare(snB)
+          })
+        }
+
         this.docks = list
         this.dockLoadError = ''
         if (this.selectedDock) {
