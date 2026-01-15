@@ -14,8 +14,8 @@
           <div class="dock-container">
             <div v-for="(item, index) in docks" :key="index" class="dock-card">
               <div class="dock-title">
-                <span class="status-dot" :class="{ online: item.link_status }"></span>
-                <span class="name-text">{{ item.dock_name }}</span>
+                <span class="status-dot" :class="{ online: item.is_online }"></span>
+                <span class="name-text">{{ getDockDisplayName(item) }}</span>
               </div>
               <div class="info-list">
                 <div class="info-row">
@@ -28,13 +28,13 @@
                 </div>
                 <div class="info-row">
                   <span class="label">🚁 无人机状态</span>
-                  <span class="value" :class="{ 'highlight': !item.drone_in_dock }">
+                  <span class="value" :class="{ 'highlight': isDroneWorking(item) }">
                     {{ getDroneInDockText(item.drone_in_dock) }}
                   </span>
                 </div>
                 <div class="info-row">
                   <span class="label">🔋 剩余电量</span>
-                  <span class="value">{{ item.drone_battery || 0 }}%</span>
+                  <span class="value">{{ formatBatteryPercent(item.drone_battery_percent) }}</span>
                 </div>
               </div>
             </div>
@@ -318,7 +318,12 @@ export default {
       nowStamp: '',
       
       // 🔥 Cesium 实例
-      cesiumViewer: null
+      cesiumViewer: null,
+      dockEntities: [],
+      dockPickHandler: null,
+      selectedDockEntity: null,
+      dockPinBuilder: null,
+      dockMarkerCache: { online: null, offline: null }
     }
   },
   computed: {
@@ -356,6 +361,11 @@ export default {
       clearInterval(this.nowStampTimer)
       this.nowStampTimer = null
     }
+    if (this.dockPickHandler) {
+      this.dockPickHandler.destroy()
+      this.dockPickHandler = null
+    }
+    this.clearDockMarkers()
     // 🔥 3. 销毁地图，防止内存泄漏
     if (this.cesiumViewer && !this.cesiumViewer.isDestroyed()) {
       this.cesiumViewer.destroy();
@@ -401,7 +411,8 @@ initCesiumMap() {
       }
     });
 
-    this.tuneCameraControls(this.cesiumViewer.scene.screenSpaceCameraController);
+      this.tuneCameraControls(this.cesiumViewer.scene.screenSpaceCameraController);
+      this.setupDockPickHandler();
     
     console.log('>>> [调试] Viewer 创建成功');
     
@@ -425,33 +436,266 @@ initCesiumMap() {
 
     // 飞过去
     const target = this.tileToLonLat(13, 6899, 3050);
-    this.cesiumViewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(target.lon, target.lat, 8000),
-        orientation: {
-          heading: 0,
-          pitch: Cesium.Math.toRadians(-90),
-          roll: 0
-        }
-    });
-    
-  } catch (e) {
+    const viewConfig = { height: 15000, latOffset: 0.01 };
+      this.cesiumViewer.camera.setView({
+          destination: Cesium.Cartesian3.fromDegrees(
+            target.lon,
+            target.lat + viewConfig.latOffset,
+            viewConfig.height
+          ),
+          orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-90),
+            roll: 0
+          }
+      });
+      this.renderDockMarkers();
+      
+    } catch (e) {
     console.error('>>> [错误] Cesium 初始化崩溃:', e);
   }
 },
     // --- 其他原有方法 ---
-    tuneCameraControls(controller) {
-      if (!controller) return
-      if (typeof controller.zoomFactor === 'number') {
-        controller.zoomFactor = 0.4
-      }
-      if (typeof controller._zoomFactor === 'number') {
-        controller._zoomFactor = 0.4
-      }
-      if (typeof controller.minimumZoomRate === 'number') {
-        controller.minimumZoomRate = 0.05
-      }
-    },
-    async loadAll() {
+      tuneCameraControls(controller) {
+        if (!controller) return
+        if (typeof controller.zoomFactor === 'number') {
+          controller.zoomFactor = 0.4
+        }
+        if (typeof controller._zoomFactor === 'number') {
+          controller._zoomFactor = 0.4
+        }
+        if (typeof controller.minimumZoomRate === 'number') {
+          controller.minimumZoomRate = 0.05
+        }
+      },
+      setupDockPickHandler() {
+        if (!this.cesiumViewer || this.dockPickHandler) return
+        this.dockPickHandler = new Cesium.ScreenSpaceEventHandler(this.cesiumViewer.scene.canvas)
+        this.dockPickHandler.setInputAction(click => {
+          const picked = this.cesiumViewer.scene.pick(click.position)
+          if (Cesium.defined(picked) && picked.id && picked.id.dockData) {
+            this.selectDockEntity(picked.id)
+            return
+          }
+          this.clearDockSelection()
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+      },
+      clearDockSelection() {
+        if (this.selectedDockEntity && this.selectedDockEntity.label) {
+          this.selectedDockEntity.label.show = false
+        }
+        this.selectedDockEntity = null
+      },
+      selectDockEntity(entity) {
+        if (!entity || !entity.label) {
+          this.clearDockSelection()
+          return
+        }
+        if (this.selectedDockEntity && this.selectedDockEntity !== entity && this.selectedDockEntity.label) {
+          this.selectedDockEntity.label.show = false
+        }
+        this.selectedDockEntity = entity
+        this.selectedDockEntity.label.show = true
+      },
+      clearDockMarkers() {
+        if (!this.cesiumViewer || !this.dockEntities.length) {
+          this.dockEntities = []
+          this.clearDockSelection()
+          return
+        }
+        this.dockEntities.forEach(entity => {
+          this.cesiumViewer.entities.remove(entity)
+        })
+        this.dockEntities = []
+        this.clearDockSelection()
+      },
+      buildDockLabelText(dock) {
+        const name = this.getDockDisplayName(dock)
+        const status = dock?.is_online ? '在线' : '离线'
+        const envTemp = this.formatTemperature(dock?.environment_temperature)
+        const wind = this.formatWindSpeed(dock?.wind_speed)
+        const droneState = this.getDroneInDockText(dock?.drone_in_dock)
+        const battery = this.formatBatteryPercent(dock?.drone_battery_percent)
+        const dockSn = dock?.dock_sn || '--'
+        const droneSn = dock?.drone_sn || '--'
+        return [
+          name,
+          `SN: ${dockSn}`,
+          `状态: ${status}`,
+          `环境温度: ${envTemp}`,
+          `风速: ${wind}`,
+          `无人机SN: ${droneSn}`,
+          `电量: ${battery}`,
+          `无人机状态: ${droneState}`
+        ].join('\n')
+      },
+      getDockMarkerImage(isOnline) {
+        const cacheKey = isOnline ? 'online' : 'offline'
+        if (!this.dockMarkerCache) {
+          this.dockMarkerCache = { online: null, offline: null }
+        }
+        if (this.dockMarkerCache[cacheKey]) return this.dockMarkerCache[cacheKey]
+
+        const palette = isOnline
+          ? { primary: '#16a34a', accent: '#86efac' }
+          : { primary: '#ea580c', accent: '#fdba74' }
+        const markerCanvas = this.createDockMarkerCanvas(palette.primary, palette.accent)
+        this.dockMarkerCache[cacheKey] = markerCanvas
+        return markerCanvas
+      },
+      createDockMarkerCanvas(primaryColor, accentColor) {
+        const size = 78
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return canvas
+
+        const center = size / 2
+        const ringRadius = 16
+        const glowRadius = 30
+        const innerRadius = 12
+        const primary = Cesium.Color.fromCssColorString(primaryColor)
+        const accent = Cesium.Color.fromCssColorString(accentColor)
+
+        const glow = ctx.createRadialGradient(center, center, 6, center, center, glowRadius)
+        glow.addColorStop(0, primary.withAlpha(0.35).toCssColorString())
+        glow.addColorStop(1, primary.withAlpha(0).toCssColorString())
+        ctx.fillStyle = glow
+        ctx.beginPath()
+        ctx.arc(center, center, glowRadius, 0, Math.PI * 2)
+        ctx.fill()
+
+        const baseY = center + ringRadius - 1
+        const tipY = center + ringRadius + 14
+        ctx.beginPath()
+        ctx.moveTo(center - 8, baseY)
+        ctx.lineTo(center + 8, baseY)
+        ctx.lineTo(center, tipY)
+        ctx.closePath()
+        ctx.fillStyle = primary.withAlpha(0.9).toCssColorString()
+        ctx.fill()
+        ctx.strokeStyle = accent.withAlpha(0.9).toCssColorString()
+        ctx.lineWidth = 2
+        ctx.stroke()
+
+        ctx.save()
+        ctx.shadowColor = primary.withAlpha(0.5).toCssColorString()
+        ctx.shadowBlur = 12
+        ctx.beginPath()
+        ctx.arc(center, center, ringRadius, 0, Math.PI * 2)
+        ctx.fillStyle = primary.withAlpha(0.92).toCssColorString()
+        ctx.fill()
+        ctx.restore()
+
+        ctx.beginPath()
+        ctx.lineWidth = 3
+        ctx.strokeStyle = accent.withAlpha(0.95).toCssColorString()
+        ctx.arc(center, center, ringRadius + 2, 0, Math.PI * 2)
+        ctx.stroke()
+
+        ctx.beginPath()
+        ctx.fillStyle = '#0b1024'
+        ctx.arc(center, center, innerRadius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.lineWidth = 1
+        ctx.strokeStyle = accent.withAlpha(0.55).toCssColorString()
+        ctx.stroke()
+
+        const runwayWidth = 8
+        const runwayHeight = 16
+        const runwayX = center - runwayWidth / 2
+        const runwayY = center - runwayHeight / 2 - 1
+        ctx.fillStyle = primary.withAlpha(0.85).toCssColorString()
+        ctx.fillRect(runwayX, runwayY, runwayWidth, runwayHeight)
+        ctx.strokeStyle = accent.withAlpha(0.8).toCssColorString()
+        ctx.lineWidth = 1
+        ctx.strokeRect(runwayX, runwayY, runwayWidth, runwayHeight)
+
+        ctx.fillStyle = '#f8fafc'
+        const lineWidth = 2
+        const lineHeight = 3
+        for (let i = 0; i < 3; i += 1) {
+          const lineY = runwayY + 2 + i * 5
+          ctx.fillRect(center - lineWidth / 2, lineY, lineWidth, lineHeight)
+        }
+
+        const terminalWidth = 16
+        const terminalHeight = 6
+        const terminalX = center - terminalWidth / 2
+        const terminalY = center + 6
+        ctx.fillStyle = accent.withAlpha(0.9).toCssColorString()
+        ctx.fillRect(terminalX, terminalY, terminalWidth, terminalHeight)
+
+        ctx.fillStyle = '#0b1024'
+        for (let i = 0; i < 3; i += 1) {
+          ctx.fillRect(terminalX + 2 + i * 5, terminalY + 2, 2, 2)
+        }
+
+        const towerWidth = 4
+        const towerHeight = 7
+        const towerX = center - 14
+        const towerY = center + 3
+        ctx.fillStyle = accent.withAlpha(0.9).toCssColorString()
+        ctx.fillRect(towerX, towerY, towerWidth, towerHeight)
+        ctx.fillStyle = accent.withAlpha(0.7).toCssColorString()
+        ctx.fillRect(towerX - 1, towerY - 3, towerWidth + 2, 3)
+
+        ctx.strokeStyle = accent.withAlpha(0.8).toCssColorString()
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.arc(towerX + towerWidth / 2, towerY - 3, 4, Math.PI, Math.PI * 1.5)
+        ctx.stroke()
+
+        return canvas
+      },
+      renderDockMarkers() {
+        if (!this.cesiumViewer) return
+        this.clearDockMarkers()
+        if (!Array.isArray(this.docks) || this.docks.length === 0) return
+
+        const entities = []
+
+        this.docks.forEach(dock => {
+          const lat = Number(dock?.latitude)
+          const lon = Number(dock?.longitude)
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return
+
+          const isOnline = Boolean(dock?.is_online)
+          const markerImage = this.getDockMarkerImage(isOnline)
+          const labelAccent = Cesium.Color.fromCssColorString(isOnline ? '#86efac' : '#fdba74')
+
+          const entity = this.cesiumViewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+            billboard: {
+              image: markerImage,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              scale: 1,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            },
+            label: {
+              text: this.buildDockLabelText(dock),
+              font: '12px "Segoe UI", sans-serif',
+              fillColor: Cesium.Color.WHITE,
+              showBackground: true,
+              backgroundColor: Cesium.Color.fromCssColorString('#0b1225').withAlpha(0.9),
+              outlineColor: labelAccent.withAlpha(0.85),
+              outlineWidth: 2,
+              pixelOffset: new Cesium.Cartesian2(0, -70),
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              show: false
+            }
+          })
+          entity.dockData = dock
+          entities.push(entity)
+        })
+
+        this.dockEntities = entities
+      },
+      async loadAll() {
       await Promise.all([
         this.loadDock(),
         this.loadRecentAlarms(),
@@ -479,7 +723,8 @@ initCesiumMap() {
           })
         }
 
-        this.docks = docksData || []
+          this.docks = docksData || []
+          this.renderDockMarkers()
       } catch (e) {
         this.dockSummary = null
         this.errors.dock = this.getErrMsg(e, '加载机场信息失败')
@@ -571,6 +816,14 @@ initCesiumMap() {
     formatTemperature(temp) {
       return temp !== null && temp !== undefined ? `${temp}℃` : '--'
     },
+    getDockDisplayName(dock) {
+      return dock?.display_name || dock?.dock_name || dock?.dock_sn || '--'
+    },
+    formatBatteryPercent(value) {
+      if (value === null || value === undefined || value === '') return '--'
+      const numeric = Number(value)
+      return Number.isFinite(numeric) ? `${numeric}%` : '--'
+    },
     tileToLonLat(z, x, y) {
       const n = Math.pow(2, z)
       const lon = ((x + 0.5) / n) * 360 - 180
@@ -589,6 +842,9 @@ initCesiumMap() {
         'failed': '失败'
       }
       return statusMap[status] || status
+    },
+    isDroneWorking(dock) {
+      return dock?.drone_in_dock === 0 || dock?.drone_in_dock === '0'
     },
     getDroneInDockText(state) {
       const stateMap = {

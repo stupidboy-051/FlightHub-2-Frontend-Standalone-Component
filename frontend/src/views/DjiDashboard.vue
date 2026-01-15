@@ -615,7 +615,7 @@ export default {
           this.viewer.scene.primitives.add(this.tileset)
           await this.tileset.readyPromise
 
-          const heightOffset = -40.2;
+          const heightOffset = 0;
 
           const boundingSphere = this.tileset.boundingSphere
           const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center)
@@ -1765,51 +1765,51 @@ export default {
         console.warn('获取组件配置失败，将使用默认配置', err);
       }
     },
-    // async setupImageryLayers(Cesium) {
-    //   if (!this.viewer) return;
-    //   const layers = this.viewer.imageryLayers;
-    //   layers.removeAll();
-    //   const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}';
-    //   const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0);
-    // 
-    //   try {
-    //     const layer = new Cesium.UrlTemplateImageryProvider({
-    //       url: localTilesUrl,
-    //       tilingScheme: new Cesium.WebMercatorTilingScheme(),
-    //       rectangle: extent,
-    //       minimumLevel: 0,
-    //       maximumLevel: 19
-    //     });
-    //     layers.addImageryProvider(layer);
-    //     setTimeout(() => {
-    //       this.viewer.camera.flyTo({ destination: extent });
-    //     }, 1000);
-    //   } catch (e) {
-    //     console.warn('地图加载失败', e);
-    //   }
-    // },
     async setupImageryLayers(Cesium) {
       if (!this.viewer) return;
       const layers = this.viewer.imageryLayers;
       layers.removeAll();
+      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}';
+      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0);
     
       try {
-        // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
-        const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
-        );
-        layers.addImageryProvider(arcgisProvider);
-    
-        // 叠加一层透明的混合路网（可选，为了看地名）
-        // const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-        //   'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
-        // );
-        // layers.addImageryProvider(roads);
-    
+        const layer = new Cesium.UrlTemplateImageryProvider({
+          url: localTilesUrl,
+          tilingScheme: new Cesium.WebMercatorTilingScheme(),
+          rectangle: extent,
+          minimumLevel: 0,
+          maximumLevel: 19
+        });
+        layers.addImageryProvider(layer);
+        setTimeout(() => {
+          this.viewer.camera.flyTo({ destination: extent });
+        }, 1000);
       } catch (e) {
         console.warn('地图加载失败', e);
       }
     },
+    // async setupImageryLayers(Cesium) {
+    //   if (!this.viewer) return;
+    //   const layers = this.viewer.imageryLayers;
+    //   layers.removeAll();
+    
+    //   try {
+    //     // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
+    //     const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+    //         'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+    //     );
+    //     layers.addImageryProvider(arcgisProvider);
+    
+    //     // 叠加一层透明的混合路网（可选，为了看地名）
+    //     // const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+    //     //   'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
+    //     // );
+    //     // layers.addImageryProvider(roads);
+    
+    //   } catch (e) {
+    //     console.warn('地图加载失败', e);
+    //   }
+    // },
     tuneCameraControls(controller) {
       if (!controller) return;
       const applyNumber = (key, value) => {
