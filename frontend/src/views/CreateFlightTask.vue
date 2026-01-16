@@ -112,6 +112,17 @@
           </el-select>
         </el-form-item>
 
+        <!-- 是否为保护区任务 -->
+        <el-form-item label="保护区监测" prop="is_protected_area" class="item-aligned">
+          <el-switch
+            v-model="form.is_protected_area"
+            active-text="是"
+            inactive-text="否"
+            inline-prompt
+          />
+          <span style="margin-left: 10px; color: #909399; font-size: 12px;">开启后将启用保护区实时监测算法</span>
+        </el-form-item>
+
         <!-- 返航高度 -->
         <el-form-item label="返航高度" prop="rth_altitude">
           <el-input v-model="form.rth_altitude" placeholder="请输入返航高度 (20-500米)" class="full-width"></el-input>
@@ -285,7 +296,8 @@ export default {
         wayline_precision_type: 'rtk',
         resumable_status: 'manual',
         task_type: 'immediate',
-        out_of_control_action_in_flight: 'return_home'
+        out_of_control_action_in_flight: 'return_home',
+        is_protected_area: false
       },
       rules: {
         name: [
@@ -682,6 +694,19 @@ export default {
 .task-form-premium :deep(.el-form-item__label) {
   color: #cbd5e1;
   font-weight: 500;
+}
+
+/* 修复对齐问题：为特定的非必填项模拟星号占位，并缩小字体防止突出 */
+.task-form-premium :deep(.item-aligned .el-form-item__label) {
+  font-size: 12px; /* 缩小字体到12px */
+  letter-spacing: -1px; /* 更紧凑的字间距 */
+  white-space: nowrap;
+}
+
+.task-form-premium :deep(.item-aligned .el-form-item__label)::before {
+  content: '*';
+  color: transparent;
+  margin-right: 4px;
 }
 
 /* 统一所有输入框样式 */

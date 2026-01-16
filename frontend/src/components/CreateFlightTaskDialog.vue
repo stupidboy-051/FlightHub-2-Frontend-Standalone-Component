@@ -60,6 +60,16 @@
           </el-select>
         </el-form-item>
 
+        <!-- 是否为保护区任务 -->
+        <el-form-item label="保护区监测" prop="is_protected_area" class="item-aligned">
+          <el-switch
+            v-model="form.is_protected_area"
+            active-text="是"
+            inactive-text="否"
+            inline-prompt
+          />
+        </el-form-item>
+
         <el-form-item label="返航高度" prop="rth_altitude">
           <el-input
             v-model.number="form.rth_altitude"
@@ -166,6 +176,7 @@ export default {
       timer: null,
       waylines: [],
       form: {
+        is_protected_area: false,
         name: '',
         sn: '',
         wayline_uuid: '',
@@ -317,6 +328,7 @@ export default {
       this.form.resumable_status = 'manual'
       this.form.task_type = 'immediate'
       this.form.out_of_control_action_in_flight = 'return_home'
+      this.form.is_protected_area = false
       this.syncSn()
     }
   }
@@ -421,6 +433,18 @@ export default {
 .task-form-dialog :deep(.el-form-item__label) {
   color: #94a3b8;
   font-weight: 500;
+}
+
+/* 修复对齐问题：为特定的非必填项模拟星号占位，并缩小字体防止突出 */
+.task-form-dialog :deep(.item-aligned .el-form-item__label) {
+  font-size: 13px; /* 稍微缩小字体 */
+  letter-spacing: -0.5px; /* 紧凑字间距 */
+}
+
+.task-form-dialog :deep(.item-aligned .el-form-item__label)::before {
+  content: '*';
+  color: transparent;
+  margin-right: 4px;
 }
 
 .task-form-dialog :deep(.el-input__wrapper),

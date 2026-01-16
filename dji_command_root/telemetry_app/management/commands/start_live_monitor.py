@@ -78,16 +78,38 @@ class Command(BaseCommand):
         # 2. 循环抽帧
         while True:
             try:
-                # 构造 ZLM 截图请求
+                # 1. 动态查找流信息
+                media_list_api = f"{ZLM_API_HOST}/index/api/getMediaList"
+                target_url = None
+                
+                try:
+                    media_resp = requests.get(media_list_api, params={"secret": ZLM_SECRET}, timeout=5)
+                    if media_resp.status_code == 200:
+                        media_data = media_resp.json()
+                        if media_data.get('code') == 0:
+                            for item in media_data.get('data', []):
+                                if item.get('stream') == stream_id:
+                                    app_name = item.get('app')
+                                    target_url = f"rtmp://127.0.0.1:1935/{app_name}/{stream_id}"
+                                    break
+                except Exception:
+                    pass
+
+                if not target_url:
+                    print(f"⏳ [等待推流] 流 {stream_id} 未在线...")
+                    time.sleep(interval)
+                    continue
+
+                # 2. 构造 ZLM 截图请求
                 snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
                 params = {
                     "secret": ZLM_SECRET,
-                    "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
+                    "url": target_url,
                     "timeout_sec": 15,
                     "expire_sec": 1
                 }
 
-                # 请求截图 (20s 超时，修复了之前的 Read timed out)
+                # 请求截图
                 resp = requests.get(snap_api, params=params, timeout=20)
 
                 if resp.status_code == 200:

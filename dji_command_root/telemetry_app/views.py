@@ -2424,16 +2424,56 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                 if loop_count % 10 == 1:
                     print(f"📡 [请求开始] Stream: {stream_id} | 准备请求ZLM截图API")
 
+                # 🔥 动态查找流信息 (App/Schema)
+                media_list_api = f"{ZLM_API_HOST}/index/api/getMediaList"
+                target_url = None
+                
+                # ⭐ SN 到 StreamID 的映射表 (解决配置名不一致问题)
+                SN_MAPPING = {
+                    "8UUXN4900A052C": "dock01",  # 工业大学机场
+                    "8UUXN4900A052D": "dock02",
+                }
+                
+                # 确定要搜索的 ID 列表 (优先搜 SN，其次搜映射名)
+                search_ids = [stream_id]
+                if stream_id in SN_MAPPING:
+                    search_ids.append(SN_MAPPING[stream_id])
+
+                try:
+                    media_resp = requests.get(media_list_api, params={"secret": ZLM_SECRET}, timeout=5)
+                    if media_resp.status_code == 200:
+                        media_data = media_resp.json()
+                        if media_data.get('code') == 0:
+                            for item in media_data.get('data', []):
+                                # 检查当前流是否匹配任何一个搜索 ID
+                                if item.get('stream') in search_ids:
+                                    # 找到流，构建 URL
+                                    app_name = item.get('app')
+                                    real_stream_id = item.get('stream')
+                                    target_url = f"rtmp://127.0.0.1:1935/{app_name}/{real_stream_id}"
+                                    if loop_count % 10 == 1:
+                                        print(f"✅ [流发现] 映射匹配: {stream_id} -> {real_stream_id}")
+                                    break
+                except Exception as e:
+                    if loop_count % 10 == 1:
+                        print(f"⚠️ [流查询失败] {e}")
+
+                if not target_url:
+                    if loop_count % 10 == 1:
+                        print(f"⏳ [等待推流] 流 {stream_id} (或映射ID) 未在线...")
+                    stop_event.wait(2.0)
+                    continue
+
                 snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
                 params = {
                     "secret": ZLM_SECRET,
-                    "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
+                    "url": target_url,
                     "timeout_sec": 10,  # 🔥 ZLM服务器超时10秒(给足够时间截图)
                     "expire_sec": 1
                 }
 
-                # 🔥 requests超时设置为10秒,与ZLM的timeout_sec保持一致
-                resp = requests.get(snap_api, params=params, timeout=10)
+                # 🔥 requests超时设置为12秒
+                resp = requests.get(snap_api, params=params, timeout=12)
 
                 request_time = time_module.time() - request_start
                 if loop_count % 10 == 1:
@@ -3559,9 +3599,10 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
                             sn=req_data.get('sn'),
                             wayline_id=wayline_id,
                             params=req_data,
-                            status='created'
+                            status='created',
+                            is_protected_area=req_data.get('is_protected_area', False)
                         )
-                        print(f"✅ [DB] Flight task recorded: {task_uuid}, wayline_id: {wayline_id}")
+                        print(f"✅ [DB] Flight task recorded: {task_uuid}, wayline_id: {wayline_id}, is_protected_area: {req_data.get('is_protected_area', False)}")
                 except Exception as db_e:
                     print(f"⚠️ [DB Error] Failed to record flight task: {db_e}")
 

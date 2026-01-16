@@ -383,6 +383,9 @@ class FlightTaskInfo(models.Model):
     # 存储创建任务时的完整参数，方便回溯
     params = models.JSONField(blank=True, null=True, verbose_name="任务参数")
     
+    # 新增字段：是否为保护区任务
+    is_protected_area = models.BooleanField(default=False, verbose_name="是否为保护区任务")
+
     # 状态字段，可以记录任务的执行状态
     status = models.CharField(max_length=50, default="created", verbose_name="任务状态")
     

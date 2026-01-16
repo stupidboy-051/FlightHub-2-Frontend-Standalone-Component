@@ -59,11 +59,27 @@ class Command(BaseCommand):
 
         # 测试3：尝试截图
         self.stdout.write(f"\n【测试3】尝试对流 {stream_id} 截图...")
+        
+        # 动态查找正确的 App 名称
+        target_url = f"rtmp://127.0.0.1:1935/live/{stream_id}"  # 默认值
+        try:
+            media_resp = requests.get(f"{ZLM_API_HOST}/index/api/getMediaList", params={"secret": ZLM_SECRET}, timeout=5)
+            if media_resp.status_code == 200:
+                media_data = media_resp.json()
+                for item in media_data.get('data', []):
+                    if item.get('stream') == stream_id:
+                        app_name = item.get('app')
+                        target_url = f"rtmp://127.0.0.1:1935/{app_name}/{stream_id}"
+                        self.stdout.write(f"✅ 自动发现流地址: {target_url}")
+                        break
+        except Exception:
+            pass
+
         try:
             snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
             params = {
                 "secret": ZLM_SECRET,
-                "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
+                "url": target_url,
                 "timeout_sec": 5,
                 "expire_sec": 1
             }
@@ -77,19 +93,27 @@ class Command(BaseCommand):
             self.stdout.write(f"📄 响应内容前500字符: {resp.text[:500]}")
 
             if resp.status_code == 200:
-                try:
-                    data = resp.json()
-                    self.stdout.write(f"📊 JSON返回码: {data.get('code')}")
-                    self.stdout.write(f"📊 JSON消息: {data.get('msg')}")
+                # 检查是否为图片（直接返回二进制数据）
+                content_type = resp.headers.get('Content-Type', '')
+                if 'image' in content_type or resp.content[:4] == b'\xff\xd8\xff\xe0' or resp.content.startswith(b'\x89PNG'):
+                    self.stdout.write(self.style.SUCCESS(f"✅ 截图成功！"))
+                    self.stdout.write(f"📸 响应类型: {content_type}")
+                    self.stdout.write(f"📦 图片大小: {len(resp.content)} 字节")
+                else:
+                    try:
+                        data = resp.json()
+                        self.stdout.write(f"📊 JSON返回码: {data.get('code')}")
+                        self.stdout.write(f"📊 JSON消息: {data.get('msg')}")
 
-                    if data.get('code') == 0:
-                        self.stdout.write(self.style.SUCCESS(f"✅ 截图成功！"))
-                        self.stdout.write(f"📸 截图URL: {data.get('data', '')}")
-                    else:
-                        self.stdout.write(self.style.ERROR(f"❌ ZLM返回错误码: {data.get('code')}"))
-                        self.stdout.write(f"📄 错误消息: {data.get('msg')}")
-                except json.JSONDecodeError as e:
-                    self.stdout.write(self.style.ERROR(f"❌ 响应不是有效JSON: {e}"))
+                        if data.get('code') == 0:
+                            self.stdout.write(self.style.SUCCESS(f"✅ 截图成功！"))
+                            self.stdout.write(f"📸 截图URL: {data.get('data', '')}")
+                        else:
+                            self.stdout.write(self.style.ERROR(f"❌ ZLM返回错误码: {data.get('code')}"))
+                            self.stdout.write(f"📄 错误消息: {data.get('msg')}")
+                    except json.JSONDecodeError:
+                        # 既不是图片也不是JSON
+                        self.stdout.write(self.style.ERROR(f"❌ 未知响应格式 (非图片且非JSON)"))
             else:
                 self.stdout.write(self.style.ERROR(f"❌ HTTP错误: {resp.status_code}"))
 

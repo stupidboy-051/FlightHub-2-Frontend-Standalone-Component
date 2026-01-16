@@ -237,47 +237,56 @@ class Command(BaseCommand):
         处理位置数据入库
         同时处理机场状态和无人机位置
         """
+        print(f"\n🔍 [DEBUG] 开始处理位置数据 | Topic: {topic}")
+        
         # 避免未导入模型报错
         try:
             from telemetry_app.models import DronePosition, DockStatus
         except ImportError:
             # 如果没有这个 app，直接返回，避免报错
-            print("❌ 模型导入失败：telemetry_app.models.DronePosition or DockStatus")
+            print("❌ [DEBUG] 模型导入失败：telemetry_app.models.DronePosition or DockStatus")
             return
 
         try:
             payload = data.get('data', data)
             if not isinstance(payload, dict):
-                print(f"   ⚠️ payload不是dict: {type(payload)}")
+                print(f"   ⚠️ [DEBUG] payload不是dict: {type(payload)}")
                 return
 
-            print(f"   📦 解析payload:")
-            print(f"      - payload keys: {list(payload.keys())}")
+            # print(f"   📦 解析payload:")
+            # print(f"      - payload keys: {list(payload.keys())}")
 
             lat = payload.get('latitude') or payload.get('lat')
             lon = payload.get('longitude') or payload.get('lon')
             alt = payload.get('height') or payload.get('altitude')
 
-            print(f"      - 纬度: {lat}, 经度: {lon}, 高度: {alt}")
+            print(f"   📍 [DEBUG] 提取坐标: lat={lat}, lon={lon}, alt={alt}")
 
             # --- 增强的过滤逻辑 (User Request) ---
             # 1. 获取 SN 和 Gateway
             sn = data.get('sn')
             gateway_raw = data.get('gateway')
 
-            print(f"   🔍 过滤检查:")
-            print(f"      - SN: {sn}")
-            print(f"      - Gateway: {gateway_raw}")
+            # print(f"   🔍 过滤检查:")
+            # print(f"      - SN: {sn}")
+            # print(f"      - Gateway: {gateway_raw}")
 
             # 2. 从 Topic 中提取设备 SN
-            # Topic 格式: thing/product/设备SN/osd
+            # Topic 格式A: thing/product/设备SN/osd
+            # Topic 格式B: sys/product/PID/device/设备SN/osd
             topic_sn = None
             if '/osd' in topic or '/events' in topic:
                 parts = topic.split('/')
-                if len(parts) >= 3:
+                # 处理 sys/product/pid/device/sn/osd 格式
+                if topic.startswith('sys/') and len(parts) >= 5:
+                    topic_sn = parts[4]
+                    print(f"   🧩 [DEBUG] 识别为 sys Topic, 提取 SN: {topic_sn}")
+                # 处理 thing/product/sn/osd 格式
+                elif len(parts) >= 3:
                     topic_sn = parts[2]
-
-            print(f"      - Topic中的设备SN: {topic_sn}")
+                    print(f"   🧩 [DEBUG] 识别为 thing Topic, 提取 SN: {topic_sn}")
+            
+            # print(f"      - Topic中的设备SN: {topic_sn}")
 
             # 3. 过滤规则：
             #    规则A: 如果消息中没有 sn 字段,尝试从 Topic 提取
@@ -285,22 +294,45 @@ class Command(BaseCommand):
             if not sn:
                 if topic_sn:
                     sn = topic_sn
-                    print(f"   ℹ️ 消息中无SN字段,使用Topic中的SN: {sn}")
+                    print(f"   ℹ️ [DEBUG] Payload无SN, 使用Topic SN: {sn}")
                 else:
-                    print(f"   🚫 [规则A] 忽略无SN消息")
+                    print(f"   🚫 [DEBUG] 无法获取SN, 忽略消息")
                     return
 
             # 4. 确认通过过滤，使用 SN
             device_sn = sn
 
             # 🔥 判断是机场还是无人机 (SN以8开头的是机场)
+            # 机场 SN 通常以 '8' 开头，如 8UUX...
+            # 无人机 SN 通常以 '1' 开头，如 1581...
             if device_sn.startswith('8'):
-                print(f"   🏭 识别为机场设备: {device_sn}")
+                print(f"   🏭 [DEBUG] 识别为机场设备: {device_sn}")
                 self.update_dock_status(device_sn, payload, topic, gateway_raw)
             else:
-                print(f"   🚁 识别为无人机设备: {device_sn}")
+                print(f"   🚁 [DEBUG] 识别为无人机设备: {device_sn}")
+                # 检查数据结构：无人机 OSD 数据可能在 payload 的 output.ext 字段中 (AirSense 或其他事件)
+                # 但根据日志，标准 OSD 消息 topic=thing/product/{sn}/osd 通常 payload 结构扁平
+                # 日志显示 topic=thing/product/1581F8HGX255D00A0DK8/osd, bytes=3671 -> 这是标准的 OSD
+                
+                # 再次确认坐标
+                if lat is None or lon is None:
+                    # 尝试从嵌套结构查找 (针对 uom_fly_data_info 等事件)
+                    if 'output' in payload and 'ext' in payload['output']:
+                        ext = payload['output']['ext']
+                        lat = ext.get('latitude')
+                        lon = ext.get('longitude')
+                        alt = ext.get('height')
+                        
+                        # 🔥 修正：某些事件中的经纬度可能是整数格式（如 417281567），需要除以 10^7
+                        if lat and abs(lat) > 900:
+                            lat = lat / 1e7
+                        if lon and abs(lon) > 1800:
+                            lon = lon / 1e7
+                            
+                        print(f"   🔄 [DEBUG] 从 output.ext 提取坐标: lat={lat}, lon={lon}")
+
                 # 保存无人机位置
-                if lat and lon:
+                if lat is not None and lon is not None:
                     DronePosition.objects.create(
                         device_sn=device_sn,
                         latitude=lat,
@@ -310,12 +342,14 @@ class Command(BaseCommand):
                         timestamp=timezone.now(),
                         mqtt_topic=topic
                     )
-                    print(f"   ✅ 无人机位置写入成功！{device_sn} -> ({lat}, {lon}, {alt}m)")
+                    print(f"   ✅ [DEBUG] 无人机位置写入成功！{device_sn} -> ({lat}, {lon})")
+                else:
+                    print(f"   ⚠️ [DEBUG] 无法写入: 经纬度缺失 (lat={lat}, lon={lon})")
 
         except Exception as e:
             # 数据库错误不应中断 MQTT 循环
             import traceback
-            print(f"❌ 数据库错误: {e}")
+            print(f"❌ [DEBUG] 处理异常: {e}")
             print(f"   详细错误:")
             traceback.print_exc()
 
