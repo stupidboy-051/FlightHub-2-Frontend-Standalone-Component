@@ -30,12 +30,26 @@ class Command(BaseCommand):
             default=0,
             help='记录时长（秒），0 表示持续记录 (默认: 0)'
         )
+        parser.add_argument(
+            '--filter',
+            type=str,
+            default='',
+            help='关键词过滤：只记录包含此字符串的消息'
+        )
+        parser.add_argument(
+            '--sn',
+            type=str,
+            default='',
+            help='SN过滤：只记录指定SN设备的消息'
+        )
 
     def handle(self, *args, **options):
         # 配置参数
         output_file = options['output']
         self.max_messages = options['max_messages']
         self.duration = options['duration']
+        self.filter_keyword = options['filter']
+        self.filter_sn = options['sn']
 
         # MQTT 连接配置
         broker_ip = os.getenv('MQTT_BROKER_IP', 'my_emqx')
@@ -62,6 +76,10 @@ class Command(BaseCommand):
         self.stdout.write(f"   - Broker: {broker_ip}:{broker_port}")
         self.stdout.write(f"   - 最大消息数: {self.max_messages if self.max_messages > 0 else '无限制'}")
         self.stdout.write(f"   - 记录时长: {self.duration}秒" if self.duration > 0 else "   - 记录时长: 持续记录")
+        if self.filter_keyword:
+            self.stdout.write(f"   - 关键词过滤: {self.filter_keyword}")
+        if self.filter_sn:
+            self.stdout.write(f"   - SN过滤: {self.filter_sn}")
 
         # 初始化 MQTT 客户端
         client_id = f"mqtt_logger_{random.randint(10000, 99999)}"
@@ -117,16 +135,25 @@ class Command(BaseCommand):
     def on_message(self, client, userdata, msg):
         """记录所有消息到文件"""
         try:
+            payload = msg.payload.decode('utf-8')
+            
+            # --- 过滤逻辑 ---
+            if self.filter_sn and self.filter_sn not in msg.topic and self.filter_sn not in payload:
+                return
+            if self.filter_keyword and self.filter_keyword not in payload and self.filter_keyword not in msg.topic:
+                return
+            
             self.message_count += 1
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
             # 解析消息
+            is_json = False
             try:
-                payload = msg.payload.decode('utf-8')
                 data = json.loads(payload)
                 payload_preview = json.dumps(data, ensure_ascii=False)[:500]
+                is_json = True
             except:
-                payload_preview = str(msg.payload)[:500]
+                payload_preview = str(payload)[:500]
 
             # 写入日志文件
             self.log_file.write("-" * 80 + "\n")
@@ -134,7 +161,10 @@ class Command(BaseCommand):
             self.log_file.write(f"Topic: {msg.topic}\n")
             self.log_file.write(f"QoS: {msg.qos} | 大小: {len(msg.payload)} bytes\n")
             self.log_file.write(f"Payload:\n{payload_preview}...\n")
-            self.log_file.write(f"完整JSON: {json.dumps(json.loads(payload), ensure_ascii=False)}\n")
+            
+            if is_json:
+                self.log_file.write(f"完整JSON: {json.dumps(data, ensure_ascii=False)}\n")
+            
             self.log_file.write("\n")
 
             # 实时显示进度

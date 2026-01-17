@@ -230,7 +230,11 @@ class Command(BaseCommand):
 
     def is_position_data(self, topic, data):
         """判断是否为 OSD 数据"""
-        return 'osd' in topic or ('latitude' in str(data))
+        # 增强判断逻辑：支持 latitude 全称或 lat/lon 缩写
+        data_str = str(data)
+        return ('osd' in topic) or \
+               ('latitude' in data_str) or \
+               ('lat' in data_str and 'lon' in data_str)
 
     def handle_position_data(self, data, topic):
         """
