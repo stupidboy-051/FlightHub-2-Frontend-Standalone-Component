@@ -2,12 +2,12 @@
   <div class="app-container">
     <!-- 导航栏 - 高级科技风格 -->
     <div v-if="isAuthenticated" class="premium-nav-bar">
-      <div class="nav-content">
+      <div class="nav-content" :class="isNavExpanded ? 'nav-expanded' : 'nav-collapsed'">
         <!-- Logo区域（点击返回首页） -->
-        <router-link to="/main-view" class="logo-section logo-link">
+        <router-link to="/main-view" class="logo-section logo-link" :style="logoShiftStyle">
           <div class="logo-icon">
             <img
-                src="@/assets/logo.png"
+                src="/pho/横式组合_1_.png"
                 alt="沈阳地铁低空智能巡检平台 Logo"
                 class="logo-img"
             />
@@ -16,7 +16,7 @@
         </router-link>
 
         <!-- 导航菜单 -->
-        <nav class="nav-menu">
+        <nav class="nav-menu" :aria-hidden="!isNavExpanded">
           <router-link
               to="/main-view"
               class="nav-item"
@@ -117,6 +117,18 @@
 
         <!-- 用户信息区域 -->
         <div class="user-section">
+          <button
+            class="nav-toggle"
+            type="button"
+            :class="{ 'is-open': isNavExpanded }"
+            :aria-expanded="isNavExpanded"
+            aria-label="更多菜单"
+            @click="toggleNavMenu"
+          >
+            <span class="nav-toggle-bar"></span>
+            <span class="nav-toggle-bar"></span>
+            <span class="nav-toggle-bar"></span>
+          </button>
           <div class="user-info">
             <div class="user-avatar">
               {{ currentUserName.charAt(0).toUpperCase() }}
@@ -165,6 +177,8 @@ export default {
       isAuthenticated: false,
       isAdmin: false,
       currentUserName: "",
+      isNavExpanded: false,
+      logoShift: 0,
     };
   },
   created() {
@@ -178,6 +192,17 @@ export default {
     this.$router.afterEach(() => {
       this.updateAuthStatus();
     });
+    this.updateLogoShift();
+    window.addEventListener("resize", this.updateLogoShift);
+  },
+  beforeUnmount() {
+    window.removeEventListener("resize", this.updateLogoShift);
+  },
+  computed: {
+    logoShiftStyle() {
+      const shift = this.isNavExpanded ? 0 : this.logoShift;
+      return { transform: `translateX(${shift}px)` };
+    },
   },
   methods: {
     updateAuthStatus() {
@@ -185,6 +210,9 @@ export default {
       const userInfoStr = localStorage.getItem("userInfo");
 
       this.isAuthenticated = !!token;
+      if (!this.isAuthenticated) {
+        this.isNavExpanded = false;
+      }
 
       if (userInfoStr) {
         try {
@@ -200,6 +228,23 @@ export default {
         this.currentUserName = "";
         this.isAdmin = false;
       }
+
+      this.updateLogoShift();
+    },
+    toggleNavMenu() {
+      this.isNavExpanded = !this.isNavExpanded;
+    },
+    updateLogoShift() {
+      this.$nextTick(() => {
+        const root = this.$el;
+        if (!root) return;
+        const nav = root.querySelector(".nav-content");
+        const logo = root.querySelector(".logo-section");
+        if (!nav || !logo) return;
+        const navCenter = nav.clientWidth / 2;
+        const logoCenter = logo.offsetLeft + logo.offsetWidth / 2;
+        this.logoShift = Math.round(navCenter - logoCenter);
+      });
     },
     async handleLogout() {
       try {
@@ -208,6 +253,7 @@ export default {
         this.isAuthenticated = false;
         this.isAdmin = false;
         this.currentUserName = "";
+        this.isNavExpanded = false;
         this.$router.push("/login");
       } catch (error) {
         console.error("登出失败:", error);
@@ -286,6 +332,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 32px;
+  position: relative;
 }
 
 /* Logo区域 */
@@ -294,6 +341,8 @@ body {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+  transition: transform 0.35s ease;
+  will-change: transform;
 }
 
 .logo-link {
@@ -302,8 +351,8 @@ body {
 }
 
 .logo-icon {
-  width: 80px;
-  height: 40px;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -314,6 +363,10 @@ body {
 .logo-img {
   width: 100%;
   height: 100%;
+  object-fit: contain;
+  object-position: left center;
+  transform: scale(2.8);
+  transform-origin: center center;
   display: block;
 }
 
@@ -343,6 +396,16 @@ body {
   gap: 8px;
   flex: 1;
   justify-content: center;
+  opacity: 1;
+  transform: translateX(0);
+  transition: transform 0.35s ease, opacity 0.35s ease;
+  will-change: transform, opacity;
+}
+
+.nav-content.nav-collapsed .nav-menu {
+  opacity: 0;
+  transform: translateX(140px);
+  pointer-events: none;
 }
 
 .nav-item {
@@ -436,6 +499,46 @@ body {
   align-items: center;
   gap: 16px;
   flex-shrink: 0;
+}
+
+.nav-toggle {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: rgba(15, 23, 42, 0.6);
+  color: #7dd3fc;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.nav-toggle:hover {
+  color: #e2e8f0;
+  border-color: rgba(0, 212, 255, 0.6);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.25);
+}
+
+.nav-toggle:active {
+  transform: translateY(1px);
+}
+
+.nav-toggle.is-open {
+  border-color: rgba(0, 212, 255, 0.8);
+  background: rgba(0, 212, 255, 0.12);
+  color: #e0f2fe;
+}
+
+.nav-toggle-bar {
+  width: 18px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+  display: block;
 }
 
 .user-info {

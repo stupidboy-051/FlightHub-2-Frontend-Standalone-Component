@@ -111,7 +111,7 @@ export default {
         
         this.$message.success('登录成功！')
         
-        const redirect = this.$route.query.redirect || '/'
+        const redirect = this.$route.query.redirect || '/main-view'
         this.$router.push(redirect)
       } catch (error) {
         this.$message.error(error.message || '登录失败，请检查账号密码')

@@ -119,7 +119,7 @@
           <div class="panel-section alarm-panel">
             <div class="panel-body alarm-panel-body">
               <AlarmPanel
-                  v-if="selectedWayline"
+                  v-if="monitorAlarmPanelVisible"
                   :alarms="getFilteredAlarms()"
                   :loading="loadingAlarms"
                   @refresh="handleAlarmRefresh"
@@ -128,7 +128,7 @@
                   @locate-alarm="handleLocateAlarm"
               />
               <div v-else class="dji-placeholder">
-                <p>请先选择航线查看告警信息</p>
+                <p>{{ monitorAlarmPlaceholder }}</p>
               </div>
             </div>
           </div>
@@ -229,6 +229,9 @@
             </button>
             <button class="control-btn" @click="resetCameraView">重置视角</button>
             <button class="control-btn" @click="toggleGlobe">{{ globeVisible ? '隐藏地球' : '显示地球' }}</button>
+          </div>
+          <div class="protected-alarm-toast" :class="{ show: protectedAlarmToastVisible }">
+            {{ protectedAlarmToastMessage }}
           </div>
           <!-- 直接使用ref作为Cesium容器 -->
           <div ref="cesiumContainer" class="cesium-container">
@@ -424,6 +427,15 @@ export default {
       selectedWayline: null,
       alarms: [],
       loadingAlarms: false,
+      currentTaskInfo: null,
+      isProtectedAreaTask: false,
+      currentTaskUuid: '',
+      protectedAlarmPollTimer: null,
+      protectedAlarmFetchInFlight: false,
+      protectedAlarmInitialized: false,
+      protectedAlarmToastMessage: '',
+      protectedAlarmToastVisible: false,
+      protectedAlarmToastTimer: null,
       showAlarmDetail: false,
       currentAlarm: null,
       fh2CheckTimer: null,
@@ -489,6 +501,16 @@ export default {
         return this.selectedDock?.drone_sn || this.selectedDock?.dock_sn || ''
       }
       return this.selectedDock?.dock_sn || ''
+    },
+    monitorAlarmPanelVisible() {
+      return this.currentMode === 'monitor' && this.isProtectedAreaTask && Boolean(this.currentTaskUuid)
+    },
+    monitorAlarmPlaceholder() {
+      if (!this.selectedDock) return '请选择机场'
+      if (!this.currentTaskInfo) return '暂无任务信息'
+      if (!this.isProtectedAreaTask) return '当前任务非保护区，不显示告警信息'
+      if (!this.currentTaskUuid) return '暂无任务信息'
+      return '暂无告警信息'
     }
   },
   created() {
@@ -502,6 +524,7 @@ export default {
     this.invertedTriangleImage = null
     this.alertTriangleIconCache = {}
     this.alarmEntities = []
+    this.protectedAlarmIdSet = new Set()
     this.actionDetailEntities = []
     this.pickHandler = null
   },
@@ -540,6 +563,14 @@ export default {
     if (this.positionPollTimer) {
       clearInterval(this.positionPollTimer)
       this.positionPollTimer = null
+    }
+    if (this.protectedAlarmPollTimer) {
+      clearInterval(this.protectedAlarmPollTimer)
+      this.protectedAlarmPollTimer = null
+    }
+    if (this.protectedAlarmToastTimer) {
+      clearTimeout(this.protectedAlarmToastTimer)
+      this.protectedAlarmToastTimer = null
     }
   },
   methods: {
@@ -651,7 +682,11 @@ export default {
       this.selectedWayline = wayline
 
       // 1. 先加载告警
-      this.fetchAlarmsByWayline(wayline.id)
+      if (this.currentMode === 'analysis') {
+        this.fetchAlarmsByWayline(wayline.id)
+      } else if (!this.isProtectedAreaTask) {
+        this.clearAlarmData()
+      }
 
       // 2. 获取动作详情 (用于蓝点/航线兜底)
       let validPoints = []
@@ -1265,9 +1300,13 @@ export default {
     handleDockSelected(dock) {
       if (!dock) return
       const previousSn = this.selectedDock?.drone_sn
+      const previousDockSn = this.selectedDock?.dock_sn
       this.selectedDock = dock
       this.latestPositions = []
       this.positionLoading = false
+      if (!previousDockSn || previousDockSn !== dock?.dock_sn) {
+        this.resetProtectedTaskContext()
+      }
       if (!(dock.drone_in_dock === 1 || dock.drone_in_dock === '1')) {
         this.showCreateTaskDialog = false
       }
@@ -1276,6 +1315,12 @@ export default {
       }
       this.syncLiveStreamType()
       this.startPositionPolling()
+      const dockSn = dock?.dock_sn
+      if (dockSn) {
+        this.lastTaskInfoSn = dockSn
+        this.lastTaskInfoAttempt = Date.now()
+        void this.syncWaylineFromTaskInfo(dockSn)
+      }
     },
     syncLiveStreamType() {
       const hasAirport = Boolean(this.airportPushUrl)
@@ -1666,8 +1711,17 @@ export default {
         } else if (response?.data && typeof response.data === 'object' && !Array.isArray(response.data)) {
           taskInfo = response.data
         }
-        if (!taskInfo || Object.keys(taskInfo).length === 0) return
+        if (this.selectedDock?.dock_sn && this.selectedDock.dock_sn !== normalizedSn) {
+          return
+        }
+        if (!taskInfo || Object.keys(taskInfo).length === 0) {
+          this.currentTaskInfo = null
+          this.resetProtectedTaskContext()
+          return
+        }
+        this.currentTaskInfo = taskInfo
         const params = this.parseTaskParams(taskInfo.params)
+        this.updateProtectedTaskContext(taskInfo, params)
         const waylineUuid = params?.wayline_uuid || params?.wayline_id || taskInfo.wayline_id
         const normalizedUuid = String(waylineUuid || '').trim()
         if (!normalizedUuid) return
@@ -1722,6 +1776,172 @@ export default {
         return null
       }
     },
+    getTaskUuidFromTaskInfo(taskInfo, params) {
+      const candidates = [
+        params?.task_uuid,
+        params?.taskUuid,
+        params?.task_id,
+        params?.taskId,
+        taskInfo?.task_uuid,
+        taskInfo?.taskUuid
+      ]
+      for (const candidate of candidates) {
+        const value = String(candidate || '').trim()
+        if (value) return value
+      }
+      return ''
+    },
+    extractTaskIdFromImageUrl(url) {
+      if (!url) return ''
+      const value = String(url)
+      const markers = ['/media/', 'media/']
+      let marker = ''
+      let index = -1
+      for (const candidate of markers) {
+        index = value.indexOf(candidate)
+        if (index !== -1) {
+          marker = candidate
+          break
+        }
+      }
+      if (index === -1) return ''
+      const tail = value.slice(index + marker.length)
+      const endIndex = tail.search(/[/?#]/)
+      return endIndex === -1 ? tail : tail.slice(0, endIndex)
+    },
+    normalizeAlarmList(list) {
+      if (!Array.isArray(list)) return []
+      return list.map(alarm => ({
+        ...alarm,
+        image_url: alarm?.image_signed_url || alarm?.image_url
+      }))
+    },
+    filterAlarmsByTaskId(list, taskId) {
+      if (!taskId || !Array.isArray(list)) return []
+      return list.filter(alarm => {
+        const alarmTaskId = this.extractTaskIdFromImageUrl(alarm?.image_url || alarm?.image_signed_url)
+        return alarmTaskId === taskId
+      })
+    },
+    resetProtectedAlarmTracking() {
+      this.protectedAlarmInitialized = false
+      this.protectedAlarmIdSet = new Set()
+    },
+    hideProtectedAlarmToast() {
+      this.protectedAlarmToastVisible = false
+      if (this.protectedAlarmToastTimer) {
+        clearTimeout(this.protectedAlarmToastTimer)
+        this.protectedAlarmToastTimer = null
+      }
+    },
+    showProtectedAlarmToast(message) {
+      this.protectedAlarmToastMessage = message
+      this.protectedAlarmToastVisible = true
+      if (this.protectedAlarmToastTimer) {
+        clearTimeout(this.protectedAlarmToastTimer)
+      }
+      this.protectedAlarmToastTimer = setTimeout(() => {
+        this.protectedAlarmToastVisible = false
+        this.protectedAlarmToastTimer = null
+      }, 2500)
+    },
+    stopProtectedAlarmPolling() {
+      if (this.protectedAlarmPollTimer) {
+        clearInterval(this.protectedAlarmPollTimer)
+        this.protectedAlarmPollTimer = null
+      }
+    },
+    startProtectedAlarmPolling(taskUuid) {
+      if (!taskUuid || this.currentMode !== 'monitor') return
+      this.stopProtectedAlarmPolling()
+      this.protectedAlarmPollTimer = setInterval(() => {
+        this.fetchProtectedTaskAlarms({ silent: true })
+      }, 1000)
+      this.fetchProtectedTaskAlarms()
+    },
+    async fetchProtectedTaskAlarms(options = {}) {
+      const { silent = false } = options
+      if (this.currentMode !== 'monitor' || !this.isProtectedAreaTask) return
+      const taskUuid = this.currentTaskUuid
+      if (!taskUuid || this.protectedAlarmFetchInFlight) return
+      this.protectedAlarmFetchInFlight = true
+      if (!silent) {
+        this.loadingAlarms = true
+      }
+      try {
+        const response = await alarmApi.getAlarms({
+          task_uuid: taskUuid,
+          ordering: '-created_at'
+        })
+        if (this.currentMode !== 'monitor' || !this.isProtectedAreaTask || this.currentTaskUuid !== taskUuid) {
+          return
+        }
+        let list = Array.isArray(response) ? response : (response.results || [])
+        list = this.filterAlarmsByTaskId(list, taskUuid)
+        const normalized = this.normalizeAlarmList(list)
+        const nextIds = new Set(
+          normalized.map(item => item?.id).filter(id => id !== null && id !== undefined)
+        )
+        const prevIds = this.protectedAlarmIdSet || new Set()
+        const hasNew = this.protectedAlarmInitialized && Array.from(nextIds).some(id => !prevIds.has(id))
+        this.protectedAlarmInitialized = true
+        this.protectedAlarmIdSet = nextIds
+        this.alarms = normalized
+        this.plotAlarmMarkers(normalized)
+        if (hasNew) {
+          this.showProtectedAlarmToast('检测到保护区新增一条报警')
+        }
+      } catch (error) {
+        console.error('获取保护区告警失败:', error)
+        if (!silent) {
+          this.alarms = []
+          this.clearAlarmMarkers()
+        }
+      } finally {
+        if (!silent) {
+          this.loadingAlarms = false
+        }
+        this.protectedAlarmFetchInFlight = false
+      }
+    },
+    updateProtectedTaskContext(taskInfo, params) {
+      if (this.currentMode !== 'monitor') return
+      const rawProtected = taskInfo?.is_protected_area
+      const isProtected = rawProtected === true || rawProtected === 1 || rawProtected === '1'
+      const taskUuid = this.getTaskUuidFromTaskInfo(taskInfo, params)
+      const previousTaskUuid = this.currentTaskUuid
+      this.isProtectedAreaTask = isProtected
+      this.currentTaskUuid = taskUuid
+
+      if (!isProtected || !taskUuid) {
+        this.stopProtectedAlarmPolling()
+        this.resetProtectedAlarmTracking()
+        this.clearAlarmData()
+        return
+      }
+
+      if (previousTaskUuid !== taskUuid) {
+        this.resetProtectedAlarmTracking()
+        this.clearAlarmData()
+        this.startProtectedAlarmPolling(taskUuid)
+        return
+      }
+
+      if (!this.protectedAlarmPollTimer) {
+        this.startProtectedAlarmPolling(taskUuid)
+      }
+    },
+    resetProtectedTaskContext(clearAlarms = true) {
+      this.isProtectedAreaTask = false
+      this.currentTaskUuid = ''
+      this.currentTaskInfo = null
+      this.stopProtectedAlarmPolling()
+      this.resetProtectedAlarmTracking()
+      this.hideProtectedAlarmToast()
+      if (clearAlarms) {
+        this.clearAlarmData()
+      }
+    },
 
     isDroneWorking(dock) {
       return dock?.drone_in_dock === 0 || dock?.drone_in_dock === '0'
@@ -1768,52 +1988,50 @@ export default {
         console.warn('获取组件配置失败，将使用默认配置', err);
       }
     },
-    // async setupImageryLayers(Cesium) {
-    //   if (!this.viewer) return;
-    //   const layers = this.viewer.imageryLayers;
-    //   layers.removeAll();
-    //   const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}';
-    //   const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0);
-    //
-    //   try {
-    //     const layer = new Cesium.UrlTemplateImageryProvider({
-    //       url: localTilesUrl,
-    //       tilingScheme: new Cesium.WebMercatorTilingScheme(),
-    //       rectangle: extent,
-    //       minimumLevel: 0,
-    //       maximumLevel: 19
-    //     });
-    //     layers.addImageryProvider(layer);
-    //     setTimeout(() => {
-    //       if (!this.viewer) return;
-    //       this.viewer.camera.flyTo({ destination: extent });
-    //     }, 1000);
-    //   } catch (e) {
-    //     console.warn('地图加载失败', e);
-    //   }
-    // },
     async setupImageryLayers(Cesium) {
       if (!this.viewer) return;
       const layers = this.viewer.imageryLayers;
       layers.removeAll();
-    
+      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}';
+      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0);
       try {
-        // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
-        const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
-        );
-        layers.addImageryProvider(arcgisProvider);
-    
-        // 叠加一层透明的混合路网（可选，为了看地名）
-        const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
-        );
-        layers.addImageryProvider(roads);
-    
+        const layer = new Cesium.UrlTemplateImageryProvider({
+          url: localTilesUrl,
+          tilingScheme: new Cesium.WebMercatorTilingScheme(),
+          rectangle: extent,
+          minimumLevel: 0,
+          maximumLevel: 19
+        });
+        layers.addImageryProvider(layer);
+        setTimeout(() => {
+          this.viewer.camera.flyTo({ destination: extent });
+        }, 1000);
       } catch (e) {
         console.warn('地图加载失败', e);
       }
     },
+    // async setupImageryLayers(Cesium) {
+    //   if (!this.viewer) return;
+    //   const layers = this.viewer.imageryLayers;
+    //   layers.removeAll();
+
+    //   try {
+    //     // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
+    //     const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+    //         'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+    //     );
+    //     layers.addImageryProvider(arcgisProvider);
+
+    //     // 叠加一层透明的混合路网（可选，为了看地名）
+    //     const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+    //       'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
+    //     );
+    //     layers.addImageryProvider(roads);
+
+    //   } catch (e) {
+    //     console.warn('地图加载失败', e);
+    //   }
+    // },
     tuneCameraControls(controller) {
       if (!controller) return;
       const applyNumber = (key, value) => {
@@ -1847,6 +2065,7 @@ export default {
     },
 
     async fetchAlarmsByWayline(waylineId) {
+      if (this.currentMode === 'monitor') return
       if (!waylineId) {
         this.alarms = [];
         this.clearAlarmMarkers();
@@ -1874,6 +2093,12 @@ export default {
     },
 
     handleAlarmRefresh() {
+      if (this.currentMode === 'monitor') {
+        if (this.isProtectedAreaTask && this.currentTaskUuid) {
+          this.fetchProtectedTaskAlarms()
+        }
+        return
+      }
       if (this.selectedWayline) {
         this.fetchAlarmsByWayline(this.selectedWayline.id);
       }
@@ -2131,22 +2356,27 @@ export default {
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !this.viewer) return;
       const Cesium = this.cesiumLib || window.Cesium;
       if (!Cesium) return;
-      const safeHeight = Number.isFinite(altitude) ? altitude : 200;
-      const destination = Cesium.Cartesian3.fromDegrees(longitude, latitude, safeHeight);
-      this.viewer.camera.flyTo({
-        destination,
-        orientation: {
-          heading: Cesium.Math.toRadians(0),
-          pitch: Cesium.Math.toRadians(-45),
-          roll: 0.0
-        },
-        duration: 1.2
+      const baseHeight = Number.isFinite(altitude) ? altitude : 0;
+      const range = Math.max(baseHeight + 220, 260);
+      const target = Cesium.Cartesian3.fromDegrees(longitude, latitude, baseHeight);
+      const sphere = new Cesium.BoundingSphere(target, 20);
+      this.viewer.camera.flyToBoundingSphere(sphere, {
+        duration: 1.2,
+        offset: new Cesium.HeadingPitchRange(
+          Cesium.Math.toRadians(0),
+          Cesium.Math.toRadians(-35),
+          range
+        )
       });
     },
     plotAlarmMarkers(alarms) {
       if (!this.viewer) return;
       const Cesium = this.cesiumLib || window.Cesium;
       if (!Cesium) return;
+      if (this.currentMode === 'monitor' && !this.isProtectedAreaTask) {
+        this.clearAlarmMarkers()
+        return
+      }
       this.clearAlarmMarkers();
       const entities = [];
       const triangleSize = 32;
@@ -2231,6 +2461,7 @@ export default {
     clearDigitalTwinAndAlarms() {
       this.clearDigitalTwin();
       this.clearAlarmData();
+      this.resetProtectedTaskContext(false);
     },
 
     setupPickHandler(Cesium) {
@@ -3023,6 +3254,31 @@ export default {
   flex-wrap: wrap;
   gap: 8px;
   z-index: 5;
+}
+
+.protected-alarm-toast {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.9), rgba(220, 38, 38, 0.9));
+  color: #fee2e2;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 12px 30px rgba(239, 68, 68, 0.35);
+  opacity: 0;
+  transform: translateY(-12px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.protected-alarm-toast.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .control-btn {

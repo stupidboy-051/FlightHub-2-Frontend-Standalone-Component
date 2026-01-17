@@ -460,7 +460,7 @@ class FlightTaskInfoSerializer(serializers.ModelSerializer):
         model = FlightTaskInfo
         fields = [
             "id", "task_uuid", "name", "sn", "wayline_id",
-            "params", "status", "created_at", "updated_at"
+            "params", "is_protected_area", "status", "created_at", "updated_at"
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
