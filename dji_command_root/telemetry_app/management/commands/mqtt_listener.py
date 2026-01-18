@@ -252,7 +252,19 @@ class Command(BaseCommand):
             return
 
         try:
+            # 兼容两种 payload 结构：
+            # 1. 标准结构: {"data": {"latitude": ...}, "gateway": ...}
+            # 2. 扁平结构: {"latitude": ..., "gateway": ...}
             payload = data.get('data', data)
+            
+            # 如果 payload 仍然是 dict 但没有坐标，尝试检查根节点 data 是否直接包含坐标
+            # 针对日志中出现的 Topic: thing/product/1581.../osd
+            # 它的 payload 是 {"data": {"latitude": ...}}，所以 data.get('data') 是对的
+            # 但是为了保险，如果 payload 中没有坐标，我们回退一步检查原始 data
+            if isinstance(payload, dict) and 'latitude' not in payload and 'lat' not in payload:
+                 if 'latitude' in data:
+                     payload = data
+
             if not isinstance(payload, dict):
                 print(f"   ⚠️ [DEBUG] payload不是dict: {type(payload)}")
                 return
@@ -305,11 +317,30 @@ class Command(BaseCommand):
 
             # 4. 确认通过过滤，使用 SN
             device_sn = sn
+            
+            # 🔥 [新增] 深度检查 sub_device
+            # 即使 Topic 是机场的，如果 payload 里包含 sub_device 信息，说明是子设备（无人机）数据
+            if isinstance(payload, dict) and 'sub_device' in payload:
+                sub_dev = payload['sub_device']
+                if isinstance(sub_dev, dict) and 'device_sn' in sub_dev:
+                    real_sn = sub_dev['device_sn']
+                    print(f"   🕵️ [DEBUG] 发现子设备信息，修正 SN: {device_sn} -> {real_sn}")
+                    device_sn = real_sn
 
             # 🔥 判断是机场还是无人机 (SN以8开头的是机场)
             # 机场 SN 通常以 '8' 开头，如 8UUX...
             # 无人机 SN 通常以 '1' 开头，如 1581...
-            if device_sn.startswith('8'):
+            
+            # 修正逻辑：机场无人机上报的 Topic 通常包含 drc/up 或 drc/camera，且 SN 可能继承自机场
+            # 如果 Topic 明确是无人机上行数据 (drc/up)，即使 SN 是 8 开头，也应视为无人机数据
+            is_drone_data = False
+            if '/drc/up' in topic or '/drc/camera' in topic:
+                 is_drone_data = True
+                 print(f"   🚁 [DEBUG] Topic包含无人机特征 (drc/up)，强制识别为无人机数据")
+            elif not device_sn.startswith('8'):
+                 is_drone_data = True
+
+            if not is_drone_data:
                 print(f"   🏭 [DEBUG] 识别为机场设备: {device_sn}")
                 self.update_dock_status(device_sn, payload, topic, gateway_raw)
             else:

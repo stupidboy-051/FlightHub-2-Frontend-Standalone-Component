@@ -87,6 +87,37 @@ def get_minio_client():
         config=Config(signature_version="s3v4"),
     )
 
+def safe_save(instance, retries=5, delay=0.5, **kwargs):
+    """
+    Helper function to save model instances with retry logic for handling database locks.
+    """
+    import time
+    from django.db.utils import OperationalError
+    
+    for attempt in range(retries):
+        try:
+            instance.save(**kwargs)
+            return True
+        except OperationalError as e:
+            if "locked" in str(e):
+                if attempt < retries - 1:
+                    time.sleep(delay * (attempt + 1)) # Exponential backoff
+                    continue
+            print(f"❌ [DB] Save failed after {attempt+1} attempts: {e}")
+            # If it's the last attempt, we let it raise or just return False?
+            # To prevent thread crash, we better return False but log it.
+            # However, if we return False, the caller assumes it's saved.
+            # For the 'failed' status update, it's better to not crash.
+            if attempt == retries - 1:
+                 print(f"❌ [DB] Final save failure for {instance}: {e}")
+                 # We don't raise here to prevent thread crash in except blocks
+                 return False
+        except Exception as e:
+            print(f"❌ [DB] Unexpected error saving {instance}: {e}")
+            if attempt == retries - 1:
+                return False
+    return False
+
 
 # views.py 添加
 
@@ -255,36 +286,56 @@ def create_alarm_from_detection(task, img, result_data):
         high = gps.get("high")  # 提取高度信息（可能为空）
 
         # 4. 创建告警（避免重复创建）
-        # 🔥 使用 try-except 捕获并发竞态条件
-        try:
-            alarm, created = Alarm.objects.get_or_create(
-                source_image=img,
-                defaults={
-                    'wayline': task.wayline,
-                    'category': sub_category,
-                    'image_url': result_data.get("result_object_key") or img.object_key,
-                    'specific_data': result_data,
-                    'content': f"AI检测发现: {content_text}",
-                    'latitude': lat,
-                    'longitude': lon,
-                    'high': high,
-                    'status': "PENDING",
-                    'handler': "AI_ALGORITHM"
-                }
-            )
+        # 🔥 使用循环 + try-except 捕获并发竞态条件和数据库锁
+        import time
+        from django.db.utils import OperationalError
 
-            if created:
-                print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
-            else:
-                print(f"ℹ️ [Alarm] 告警已存在，跳过创建。图片ID: {img.id}")
+        for attempt in range(5):
+            try:
+                alarm, created = Alarm.objects.get_or_create(
+                    source_image=img,
+                    defaults={
+                        'wayline': task.wayline,
+                        'category': sub_category,
+                        'image_url': result_data.get("result_object_key") or img.object_key,
+                        'specific_data': result_data,
+                        'content': f"AI检测发现: {content_text}",
+                        'latitude': lat,
+                        'longitude': lon,
+                        'high': high,
+                        'status': "PENDING",
+                        'handler': "AI_ALGORITHM"
+                    }
+                )
 
-        except Exception as alarm_error:
-            # 🔥 如果是唯一性约束错误，说明其他线程已经创建了告警，忽略即可
-            if "UNIQUE constraint" in str(alarm_error) or "unique constraint" in str(alarm_error).lower():
-                print(f"ℹ️ [Alarm] 告警已存在（并发创建），跳过。图片ID: {img.id}")
-            else:
-                # 其他类型的错误，抛出异常
-                raise
+                if created:
+                    print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
+                else:
+                    print(f"ℹ️ [Alarm] 告警已存在，跳过创建。图片ID: {img.id}")
+                
+                # 成功则退出循环
+                break
+
+            except OperationalError as e:
+                # 处理数据库锁定
+                if "locked" in str(e):
+                    if attempt < 4:
+                        sleep_time = 0.5 * (attempt + 1)
+                        # print(f"⏳ [Alarm] DB Locked, retrying in {sleep_time}s...")
+                        time.sleep(sleep_time)
+                        continue
+                print(f"❌ [Alarm] DB Error: {e}")
+                if attempt == 4:
+                    raise
+
+            except Exception as alarm_error:
+                # 🔥 如果是唯一性约束错误，说明其他线程已经创建了告警，忽略即可
+                if "UNIQUE constraint" in str(alarm_error) or "unique constraint" in str(alarm_error).lower():
+                    print(f"ℹ️ [Alarm] 告警已存在（并发创建），跳过。图片ID: {img.id}")
+                    break
+                else:
+                    # 其他类型的错误，抛出异常
+                    raise
 
     except Exception as e:
         print(f"❌ [Alarm] 创建失败: {e}")
@@ -325,7 +376,7 @@ def auto_trigger_detect1(task):
 
     task.detect_status = "processing"
     task.started_at = django_timezone.now()
-    task.save(update_fields=['detect_status', 'started_at'])
+    safe_save(task, update_fields=['detect_status', 'started_at'])
 
     # 获取检测类型 (RAIL, BRIDGE...)
     algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
@@ -412,12 +463,12 @@ def auto_trigger_detect1(task):
             import traceback
             traceback.print_exc()
             img.detect_status = "failed"
-            img.save(update_fields=['detect_status'])
+            safe_save(img, update_fields=['detect_status'])
         # =================================================================
 
     task.finished_at = django_timezone.now()
     task.detect_status = "done"
-    task.save(update_fields=['detect_status', 'finished_at'])
+    safe_save(task, update_fields=['detect_status', 'finished_at'])
     print(f"🏁 [Detect] 任务 {task.id} 结束.")
 
 def auto_trigger_detect(task):
@@ -453,7 +504,7 @@ def auto_trigger_detect(task):
             # 🔥 修改：只有第一次启动时才更新 started_at
             if not task.started_at:
                 task.started_at = django_timezone.now()
-                task.save(update_fields=['started_at'])
+                safe_save(task, update_fields=['started_at'])
 
             # 🔥 关键：不改变任务状态，保持 scanning 让轮询继续扫描新图
 
@@ -505,7 +556,7 @@ def auto_trigger_detect(task):
 
                         img.result = data
                         img.detect_status = "done"
-                        img.save(update_fields=['detect_status', 'result'])
+                        safe_save(img, update_fields=['detect_status', 'result'])
 
                         algo_status = data.get("detection_status", 0)
 
@@ -524,10 +575,10 @@ def auto_trigger_detect(task):
                             img.retry_count += 1
                             img.detect_status = "pending"  # 重新入队
                             print(f"🔄 [Detect] 图片 {img.id} 算法服务错误 {resp.status_code}，重试 ({img.retry_count}/{img.max_retries})")
-                            img.save()
+                            safe_save(img)
                         else:
                             img.detect_status = "failed"
-                            img.save(update_fields=['detect_status'])
+                            safe_save(img, update_fields=['detect_status'])
 
                 # 🔥 修复 3：改进异常处理，区分超时、连接错误等
                 except requests.Timeout:
@@ -543,7 +594,7 @@ def auto_trigger_detect(task):
                     else:
                         img.detect_status = "failed"
                         print(f"❌ [Detect] 图片 {img.id} 检测超时，达到最大重试次数 ({img.max_retries})")
-                    img.save()
+                    safe_save(img)
 
                 except requests.ConnectionError as conn_err:
                     # 连接错误：算法服务可能挂了
@@ -557,7 +608,7 @@ def auto_trigger_detect(task):
                     else:
                         img.detect_status = "failed"
                         print(f"❌ [Detect] 图片 {img.id} 连接失败，达到最大重试次数 ({img.max_retries})")
-                    img.save()
+                    safe_save(img)
 
                 except Exception as e:
                     # 其他异常：打印完整堆栈
@@ -567,7 +618,7 @@ def auto_trigger_detect(task):
 
                     # 🔥 其他错误不重试，直接标记失败
                     img.detect_status = "failed"
-                    img.save()
+                    safe_save(img)
 
             # 🔥 本轮检测完成
             print(f"✅ [Detect] 任务 {task.id} 本轮检测完成 ({len(images)}张)")
@@ -825,7 +876,7 @@ def minio_poller_worker():
                 if not task.prefix_list or (task.prefix_list and task.prefix_list[0] != prefix_path):
                     print(f"🔧 [Fix Path] 修正任务 {uuid_val} 路径: {prefix_path}")
                     task.prefix_list = [prefix_path]
-                    task.save()
+                    safe_save(task)
 
                 # =========================================================
                 # B. 调用司空接口 (仅在必要时)
@@ -865,7 +916,7 @@ def minio_poller_worker():
                         print(f"🚀 [Re-open] 任务 {task.external_task_id} 收到新图，重新标记为处理中...")
                         task.detect_status = "processing"
 
-                    task.save()
+                    safe_save(task)
                     print(f"📸 [Poller] 任务 {task.external_task_id} 同步了 {new_images_count} 张新图")
 
                 # 🔥 新增：检查是否有待检测图片（不管是否有新图）
@@ -955,7 +1006,7 @@ def minio_poller_worker():
 
                     # 设置父任务关系
                     task.parent_task = parent_task
-                    task.save()
+                    safe_save(task)
 
                     print(f"📂 [Fixed Folder] 父任务: {parent_task_id}")
 
@@ -971,7 +1022,7 @@ def minio_poller_worker():
                 # 更新任务的检测类型
                 if task.detect_category != category:
                     task.detect_category = category
-                    task.save()
+                    safe_save(task)
 
                 # 同步图片
                 new_images_count = sync_images_core(task)
@@ -1020,7 +1071,7 @@ def minio_poller_worker():
                             print(f"✅ [Fixed Folder Done] 任务 {task_id} 已静默 {int(minutes_silent)} 分钟，自动结束。")
                             task.detect_status = "done"
                             task.finished_at = django_timezone.now()
-                            task.save()
+                            safe_save(task)
 
         except Exception as e:
             print(f"❌ Poller Error: {e}")
@@ -1181,7 +1232,7 @@ def minio_poller_worker1231():
                         print(f"✅ [Poller] 任务 {task.external_task_id} 所有图片处理完毕，标记为完成")
                         task.detect_status = 'done'
                         task.finished_at = django_timezone.now()
-                        task.save(update_fields=['detect_status', 'finished_at'])
+                        safe_save(task, update_fields=['detect_status', 'finished_at'])
 
                         # 🔥 新增：检查父任务，如果所有子任务都完成了，同步父任务状态
                         if task.parent_task:
@@ -1190,7 +1241,7 @@ def minio_poller_worker1231():
                             if all_sub_done and parent.detect_status != 'done':
                                 parent.detect_status = 'done'
                                 parent.finished_at = django_timezone.now()
-                                parent.save(update_fields=['detect_status', 'finished_at'])
+                                safe_save(parent, update_fields=['detect_status', 'finished_at'])
                                 print(f"🎉 [Poller] 父任务 {parent.external_task_id} 所有子任务完成，标记为完成")
                     else:
                         print(f"⏳ [Poller] 任务 {task.external_task_id} 还有 {processing_cnt} 张图片正在检测中...")
@@ -1382,7 +1433,7 @@ def minio_poller_worker2():
                         if dji_task_info and not created:
                             if parent_task.dji_status != dji_status_val:
                                 parent_task.dji_status = dji_status_val
-                                parent_task.save(update_fields=['dji_status'])
+                                safe_save(parent_task, update_fields=['dji_status'])
 
                         # 🔥 修复：构造子任务名称时使用 today_str（已定义）而不是未定义的 date_str
                         # 构造子任务名称：日期 + 航线名 + 检测类型
@@ -1428,7 +1479,7 @@ def minio_poller_worker2():
                             if fp:
                                 target_task.wayline = fp.wayline
                                 target_task.detect_category = fp.detect_category
-                                target_task.save(update_fields=['wayline', 'detect_category'])
+                                safe_save(target_task, update_fields=['wayline', 'detect_category'])
                                 print(f"🔧 [Backfill] 任务 {target_task.external_task_id} 已回填分类与航线: {fp.detect_category.name if fp.detect_category else '无'} -> {fp.wayline.name}")
                         except Exception as _e:
                             print(f"⚠️ [Backfill] 无法回填分类: {_e}")
@@ -1452,7 +1503,7 @@ def minio_poller_worker2():
                              print(f"♻️ [Re-Activate] 任务 {target_task.external_task_id} 被重新激活 (Done -> Scanning)")
                              target_task.detect_status = 'scanning'
                         
-                        target_task.save()
+                        safe_save(target_task)
 
                         # 3. 自动触发检测 (对新图片)
                         #    注意：auto_trigger_detect 内部会找 pending 的图片进行检测
@@ -1482,7 +1533,7 @@ def minio_poller_worker2():
                         print(f"🏁 [Timeout Done] 任务 {task.external_task_id} 已静默 {int(minutes_silent)} 分钟 (> {SILENCE_TIMEOUT_MINUTES}m)，自动结束。")
                         task.detect_status = 'done'
                         task.finished_at = django_timezone.now()
-                        task.save()
+                        safe_save(task)
                         
                         # 同步父任务状态 (如果所有子任务都完了，父任务也完了)
                         if task.parent_task:
@@ -1490,7 +1541,7 @@ def minio_poller_worker2():
                             if not all_subs.filter(detect_status__in=['scanning', 'processing', 'pending']).exists():
                                 task.parent_task.detect_status = 'done'
                                 task.parent_task.finished_at = django_timezone.now()
-                                task.parent_task.save()
+                                safe_save(task.parent_task)
                                 print(f"🏁 [Parent Done] 父任务 {task.parent_task.external_task_id} 也已全部完成。")
                     else:
                         # 还有图片没跑完，虽然没新图了，但还得等算法跑完
