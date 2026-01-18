@@ -20,20 +20,21 @@
         <option value="failed">失败</option>
       </select>
       
-      <select v-model="waylineFilter" @change="loadTasks" class="filter-select">
-        <option value="">全部航线</option>
-        <option v-for="wayline in waylines" :key="wayline.id" :value="wayline.id">
-          {{ wayline.name }}
-        </option>
-      </select>
-
-      <!-- 🔥 新增：检测类型筛选 -->
-      <select v-model="categoryFilter" @change="loadTasks" class="filter-select">
+      <!-- 🔥 新增：检测类型筛选 (Level 1) -->
+      <select v-model="categoryFilter" @change="handleCategoryChange" class="filter-select">
         <option value="">全部类型</option>
         <option value="rail">🛤️ 铁路检测</option>
         <option value="contactline">⚡ 接触网检测</option>
         <option value="bridge">🌉 桥梁检测</option>
         <option value="protected_area">🛡️ 保护区检测</option>
+      </select>
+
+      <!-- 航线筛选 (Level 2) -->
+      <select v-model="waylineFilter" @change="loadTasks" class="filter-select">
+        <option value="">全部航线</option>
+        <option v-for="wayline in filteredWaylines" :key="wayline.id" :value="wayline.id">
+          {{ wayline.name }}
+        </option>
       </select>
     </div>
     
@@ -306,7 +307,22 @@ export default {
     await this.loadWaylines()
     await this.loadTasks()
   },
+  computed: {
+    filteredWaylines() {
+      if (!this.categoryFilter) {
+        return this.waylines
+      }
+      return this.waylines.filter(wayline => 
+        (wayline.detect_type || '').toLowerCase() === this.categoryFilter.toLowerCase()
+      )
+    }
+  },
   methods: {
+    handleCategoryChange() {
+      this.waylineFilter = '' // Reset wayline filter
+      this.currentPage = 1
+      this.loadTasks()
+    },
     async loadWaylines() {
       try {
         const response = await waylineApi.getWaylines({ page_size: 1000 })

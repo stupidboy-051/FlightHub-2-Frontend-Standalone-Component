@@ -285,6 +285,11 @@ def create_alarm_from_detection(task, img, result_data):
         lon = gps.get("lon", 0)
         high = gps.get("high")  # 提取高度信息（可能为空）
 
+        # 🔥 尝试关联 FlightTaskInfo (方便统计)
+        flight_task_obj = None
+        if getattr(task, 'dji_task_uuid', None):
+            flight_task_obj = FlightTaskInfo.objects.filter(task_uuid=task.dji_task_uuid).first()
+
         # 4. 创建告警（避免重复创建）
         # 🔥 使用循环 + try-except 捕获并发竞态条件和数据库锁
         import time
@@ -296,6 +301,7 @@ def create_alarm_from_detection(task, img, result_data):
                     source_image=img,
                     defaults={
                         'wayline': task.wayline,
+                        'flight_task': flight_task_obj,
                         'category': sub_category,
                         'image_url': result_data.get("result_object_key") or img.object_key,
                         'specific_data': result_data,

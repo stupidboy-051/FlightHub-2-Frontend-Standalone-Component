@@ -10,9 +10,9 @@
           </svg>
         </div>
         <div class="header-text">
-          <p class="eyebrow">推线检测流程展示</p>
+          <p class="eyebrow">异常检测结果展示</p>
           <h1 class="page-title">AI检测</h1>
-          <p class="page-subtitle">使用告警图片还原推线检测的处理状态，前两张保持“检测中”提示，自动轮播播放</p>
+          <p class="page-subtitle">自动轮播展示历史告警图片及其识别结果</p>
         </div>
       </div>
       <div class="header-stats">
@@ -159,8 +159,8 @@
         <template v-if="!currentInspectTaskId">
           <div class="card-header">
             <div>
-              <h3 class="card-title">推线检测流程</h3>
-              <p class="card-subtitle">按时间顺序轮播，第一、第二张保留检测中提示</p>
+              <h3 class="card-title">异常检测结果</h3>
+              <p class="card-subtitle">按时间顺序轮播展示已入库的识别结果</p>
             </div>
             <div class="legend">
               <span class="legend-dot processing"></span>
@@ -787,7 +787,8 @@ export default {
       }
     },
     async loadAlarms() {
-      const params = { page_size: 50, ordering: '-created_at' }
+      // 增大 page_size 以获取更多异常图片，实现“轮播所有”
+      const params = { page_size: 500, ordering: '-created_at' }
       if (this.selectedWayline) {
         params.wayline_id = this.selectedWayline
       }
@@ -806,7 +807,8 @@ export default {
         const bTime = new Date(b.created_at || 0).getTime()
         return bTime - aTime
       })
-      this.flowSlides = this.buildSlides(sorted.slice(0, 10))
+      // 不再截取前10条，而是轮播所有获取到的异常图片
+      this.flowSlides = this.buildSlides(sorted)
       this.activeIndex = 0
       this.stopAuto()
       this.startAuto()
@@ -973,18 +975,14 @@ export default {
       this.previewItem = null
     },
     buildSlides(list) {
-      const hints = [
-        '模型正在推线检测中',
-        '二次校验中，等待结果确认'
-      ]
       return list.map((item, idx) => {
-        const processing = idx < 2
+        // 移除“伪装检测中”的逻辑，全部展示为识别完成
         return {
           ...item,
           key: `${item.id || idx}-${idx}`,
-          state: processing ? 'processing' : 'done',
-          stateText: processing ? '检测中' : '识别完成',
-          hint: processing ? (hints[idx] || '检测中...') : '识别结果已入库，倒序展示'
+          state: 'done',
+          stateText: '识别完成',
+          hint: '识别结果已入库，倒序展示'
         }
       })
     },

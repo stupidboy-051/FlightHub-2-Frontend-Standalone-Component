@@ -113,6 +113,15 @@ class Alarm(models.Model):
     """告警信息表 (业务结果)"""
     wayline = models.ForeignKey(Wayline, on_delete=models.SET_NULL, null=True, blank=True, related_name='alarms',
                                 verbose_name="关联航线")
+    # 🔥 新增：关联飞行任务 (方便统计)
+    flight_task = models.ForeignKey(
+        'FlightTaskInfo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='alarms',
+        verbose_name="关联飞行任务"
+    )
     category = models.ForeignKey(AlarmCategory, on_delete=models.PROTECT, verbose_name="告警类型", null=True,
                                  blank=True)
 

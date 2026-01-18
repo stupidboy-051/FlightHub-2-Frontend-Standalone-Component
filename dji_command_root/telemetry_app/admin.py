@@ -60,8 +60,8 @@ class AlarmCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Alarm)
 class AlarmAdmin(admin.ModelAdmin):
-    list_display = ['id', 'category', 'wayline', 'latitude', 'longitude', 'status', 'created_at']
-    list_filter = ['status', 'category']
+    list_display = ['id', 'category', 'wayline', 'flight_task', 'latitude', 'longitude', 'status', 'created_at']
+    list_filter = ['status', 'category', 'flight_task']
     search_fields = ['content']
 
 

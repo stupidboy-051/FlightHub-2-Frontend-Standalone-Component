@@ -165,141 +165,143 @@
     </div>
 
     <!-- 详情弹窗 -->
-    <div v-if="selectedDock" class="dock-detail-modal" @click="closeDockDetail">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ selectedDock.display_name || selectedDock.dock_name || selectedDock.dock_sn }}</h3>
-          <button class="btn-close" @click="closeDockDetail">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="detail-section">
-            <h4>基本信息</h4>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">机场SN:</span>
-                <span class="detail-value">{{ selectedDock.dock_sn }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">在线状态:</span>
-                <span class="detail-value" :class="{ 'text-success': selectedDock.is_online, 'text-danger': !selectedDock.is_online }">
-                  {{ selectedDock.online_status }}
-                </span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">模式代码:</span>
-                <span class="detail-value">{{ selectedDock.mode_code }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">激活时间:</span>
-                <span class="detail-value">{{ formatTimestamp(selectedDock.activation_time) }}</span>
+    <Teleport to="body">
+      <div v-if="selectedDock" class="dock-detail-modal" @click="closeDockDetail">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h3>{{ selectedDock.display_name || selectedDock.dock_name || selectedDock.dock_sn }}</h3>
+            <button class="btn-close" @click="closeDockDetail">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="detail-section">
+              <h4>基本信息</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">机场SN:</span>
+                  <span class="detail-value">{{ selectedDock.dock_sn }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">在线状态:</span>
+                  <span class="detail-value" :class="{ 'text-success': selectedDock.is_online, 'text-danger': !selectedDock.is_online }">
+                    {{ selectedDock.online_status }}
+                  </span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">模式代码:</span>
+                  <span class="detail-value">{{ selectedDock.mode_code }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">激活时间:</span>
+                  <span class="detail-value">{{ formatTimestamp(selectedDock.activation_time) }}</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="detail-section">
-            <h4>环境参数</h4>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">环境温度:</span>
-                <span class="detail-value">{{ selectedDock.environment_temperature }}℃</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">机场温度:</span>
-                <span class="detail-value">{{ selectedDock.temperature }}℃</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">湿度:</span>
-                <span class="detail-value">{{ selectedDock.humidity }}%</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">风速:</span>
-                <span class="detail-value">{{ selectedDock.wind_speed }} m/s</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">降雨量:</span>
-                <span class="detail-value">{{ selectedDock.rainfall }}</span>
+            <div class="detail-section">
+              <h4>环境参数</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">环境温度:</span>
+                  <span class="detail-value">{{ selectedDock.environment_temperature }}℃</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">机场温度:</span>
+                  <span class="detail-value">{{ selectedDock.temperature }}℃</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">湿度:</span>
+                  <span class="detail-value">{{ selectedDock.humidity }}%</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">风速:</span>
+                  <span class="detail-value">{{ selectedDock.wind_speed }} m/s</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">降雨量:</span>
+                  <span class="detail-value">{{ selectedDock.rainfall }}</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="detail-section">
-            <h4>电源状态</h4>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">供电电压:</span>
-                <span class="detail-value">{{ selectedDock.electric_supply_voltage }} V</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">工作电压:</span>
-                <span class="detail-value">{{ selectedDock.working_voltage }} mV</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">工作电流:</span>
-                <span class="detail-value">{{ selectedDock.working_current }} mA</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">功率:</span>
-                <span class="detail-value">{{ selectedDock.power_status }} W</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">备用电池电压:</span>
-                <span class="detail-value">{{ selectedDock.backup_battery_voltage }} mV</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">备用电池温度:</span>
-                <span class="detail-value">{{ selectedDock.backup_battery_temperature }}℃</span>
+            <div class="detail-section">
+              <h4>电源状态</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">供电电压:</span>
+                  <span class="detail-value">{{ selectedDock.electric_supply_voltage }} V</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">工作电压:</span>
+                  <span class="detail-value">{{ selectedDock.working_voltage }} mV</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">工作电流:</span>
+                  <span class="detail-value">{{ selectedDock.working_current }} mA</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">功率:</span>
+                  <span class="detail-value">{{ selectedDock.power_status }} W</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">备用电池电压:</span>
+                  <span class="detail-value">{{ selectedDock.backup_battery_voltage }} mV</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">备用电池温度:</span>
+                  <span class="detail-value">{{ selectedDock.backup_battery_temperature }}℃</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="detail-section">
-            <h4>硬件状态</h4>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">舱盖状态:</span>
-                <span class="detail-value">{{ getCoverStateText(selectedDock.cover_state) }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">推杆状态:</span>
-                <span class="detail-value">{{ selectedDock.putter_state }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">补光灯:</span>
-                <span class="detail-value">{{ selectedDock.supplement_light_state === 1 ? '开启' : '关闭' }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">急停状态:</span>
-                <span class="detail-value" :class="{ 'text-danger': selectedDock.emergency_stop_state === 1 }">
-                  {{ selectedDock.emergency_stop_state === 1 ? '已触发' : '正常' }}
-                </span>
+            <div class="detail-section">
+              <h4>硬件状态</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">舱盖状态:</span>
+                  <span class="detail-value">{{ getCoverStateText(selectedDock.cover_state) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">推杆状态:</span>
+                  <span class="detail-value">{{ selectedDock.putter_state }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">补光灯:</span>
+                  <span class="detail-value">{{ selectedDock.supplement_light_state === 1 ? '开启' : '关闭' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">急停状态:</span>
+                  <span class="detail-value" :class="{ 'text-danger': selectedDock.emergency_stop_state === 1 }">
+                    {{ selectedDock.emergency_stop_state === 1 ? '已触发' : '正常' }}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="detail-section" v-if="selectedDock.drone_sn">
-            <h4>无人机信息</h4>
-            <div class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">无人机SN:</span>
-                <span class="detail-value">{{ selectedDock.drone_sn }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">在舱状态:</span>
-                <span class="detail-value">{{ getDroneInDockText(selectedDock.drone_in_dock) }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">充电状态:</span>
-                <span class="detail-value">{{ selectedDock.drone_charge_state }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">电池电量:</span>
-                <span class="detail-value">{{ selectedDock.drone_battery_percent }}%</span>
+            <div class="detail-section" v-if="selectedDock.drone_sn">
+              <h4>无人机信息</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">无人机SN:</span>
+                  <span class="detail-value">{{ selectedDock.drone_sn }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">在舱状态:</span>
+                  <span class="detail-value">{{ getDroneInDockText(selectedDock.drone_in_dock) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">充电状态:</span>
+                  <span class="detail-value">{{ selectedDock.drone_charge_state }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">电池电量:</span>
+                  <span class="detail-value">{{ selectedDock.drone_battery_percent }}%</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -811,7 +813,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
+  padding: 20px 24px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   position: sticky;
   top: 0;
@@ -821,7 +823,7 @@ export default {
 
 .modal-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 20px;
   color: #f1f5f9;
   font-weight: 600;
 }
@@ -829,16 +831,16 @@ export default {
 .btn-close {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 20px;
+  font-size: 24px;
   cursor: pointer;
   color: #cbd5e1;
   padding: 0;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 8px;
   transition: all 0.2s;
 }
 
@@ -849,13 +851,13 @@ export default {
 }
 
 .modal-body {
-  padding: 8px 12px;
+  padding: 24px;
   overflow-y: auto;
   flex: 1;
 }
 
 .detail-section {
-  margin-bottom: 8px;
+  margin-bottom: 24px;
 }
 
 .detail-section:last-child {
@@ -863,10 +865,10 @@ export default {
 }
 
 .detail-section h4 {
-  margin: 0 0 4px 0;
-  font-size: 10px;
+  margin: 0 0 12px 0;
+  font-size: 16px;
   color: #f1f5f9;
-  padding-bottom: 2px;
+  padding-bottom: 8px;
   border-bottom: 1px solid rgba(56, 189, 248, 0.5);
   font-weight: 600;
 }
@@ -874,31 +876,31 @@ export default {
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  gap: 16px;
 }
 
 .detail-item {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 3px 4px;
+  gap: 4px;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 3px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .detail-label {
-  font-size: 8px;
+  font-size: 14px;
   color: #94a3b8;
   font-weight: 500;
 }
 
 .detail-value {
-  font-size: 9px;
+  font-size: 18px;
   color: #e2e8f0;
   font-weight: 600;
   word-break: break-all;
-  line-height: 1.2;
+  line-height: 1.4;
 }
 
 .text-success {

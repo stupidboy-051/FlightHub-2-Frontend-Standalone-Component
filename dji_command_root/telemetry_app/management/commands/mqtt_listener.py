@@ -304,67 +304,68 @@ class Command(BaseCommand):
             
             # print(f"      - Topic中的设备SN: {topic_sn}")
 
-            # 3. 过滤规则：
-            #    规则A: 如果消息中没有 sn 字段,尝试从 Topic 提取
-            #    规则B: 如果都没有，才是真正的无效消息 -> 忽略
+            # 3. 过滤规则与设备识别
+            #    优先使用 Topic 中的 SN 来判断是“机场消息”还是“无人机消息”
+            if not sn and topic_sn:
+                sn = topic_sn
+
             if not sn:
-                if topic_sn:
-                    sn = topic_sn
-                    print(f"   ℹ️ [DEBUG] Payload无SN, 使用Topic SN: {sn}")
-                else:
-                    print(f"   🚫 [DEBUG] 无法获取SN, 忽略消息")
-                    return
+                print(f"   🚫 [DEBUG] 无法获取SN, 忽略消息")
+                return
 
-            # 4. 确认通过过滤，使用 SN
-            device_sn = sn
+            # 4. 核心逻辑分支：机场 vs 无人机
+            #    如果 Topic SN 以 '8' 开头，这是机场发出的 OSD (包含机场位置、环境、子设备状态等)
+            #    如果 Topic SN 以 '1' 开头，这是无人机发出的 OSD (包含飞行位置、姿态等)
             
-            # 🔥 [新增] 深度检查 sub_device
-            # 即使 Topic 是机场的，如果 payload 里包含 sub_device 信息，说明是子设备（无人机）数据
-            if isinstance(payload, dict) and 'sub_device' in payload:
-                sub_dev = payload['sub_device']
-                if isinstance(sub_dev, dict) and 'device_sn' in sub_dev:
-                    real_sn = sub_dev['device_sn']
-                    print(f"   🕵️ [DEBUG] 发现子设备信息，修正 SN: {device_sn} -> {real_sn}")
-                    device_sn = real_sn
+            is_dock_topic = False
+            if topic_sn and topic_sn.startswith('8'):
+                is_dock_topic = True
+            elif sn.startswith('8'):
+                 # Fallback: 如果 Topic 解析失败但 Payload SN 是 8，也认为是机场
+                is_dock_topic = True
 
-            # 🔥 判断是机场还是无人机 (SN以8开头的是机场)
-            # 机场 SN 通常以 '8' 开头，如 8UUX...
-            # 无人机 SN 通常以 '1' 开头，如 1581...
-            
-            # 修正逻辑：机场无人机上报的 Topic 通常包含 drc/up 或 drc/camera，且 SN 可能继承自机场
-            # 如果 Topic 明确是无人机上行数据 (drc/up)，即使 SN 是 8 开头，也应视为无人机数据
-            is_drone_data = False
+            # 特殊情况：无人机通过机场链路透传的 drc 消息
             if '/drc/up' in topic or '/drc/camera' in topic:
-                 is_drone_data = True
-                 print(f"   🚁 [DEBUG] Topic包含无人机特征 (drc/up)，强制识别为无人机数据")
-            elif not device_sn.startswith('8'):
-                 is_drone_data = True
+                is_dock_topic = False
 
-            if not is_drone_data:
-                print(f"   🏭 [DEBUG] 识别为机场设备: {device_sn}")
-                self.update_dock_status(device_sn, payload, topic, gateway_raw)
-            else:
-                print(f"   🚁 [DEBUG] 识别为无人机设备: {device_sn}")
-                # 检查数据结构：无人机 OSD 数据可能在 payload 的 output.ext 字段中 (AirSense 或其他事件)
-                # 但根据日志，标准 OSD 消息 topic=thing/product/{sn}/osd 通常 payload 结构扁平
-                # 日志显示 topic=thing/product/1581F8HGX255D00A0DK8/osd, bytes=3671 -> 这是标准的 OSD
-                
-                # 再次确认坐标
-                if lat is None or lon is None:
-                    # 尝试从嵌套结构查找 (针对 uom_fly_data_info 等事件)
-                    if 'output' in payload and 'ext' in payload['output']:
-                        ext = payload['output']['ext']
-                        lat = ext.get('latitude')
-                        lon = ext.get('longitude')
-                        alt = ext.get('height')
+            if is_dock_topic:
+                print(f"   🏭 [DEBUG] 识别为机场消息: {sn}")
+                self.update_dock_status(sn, payload, topic, gateway_raw)
+                # 机场消息中可能包含 sub_device，update_dock_status 会处理它来更新机场的 drone_sn 字段
+                # 但我们不应将其视为“无人机位置更新”，因为这里的 lat/lon 通常是机场坐标
+                return
+
+            # --- 以下是无人机处理逻辑 ---
+            
+            # 5. 严格过滤：确保是真正的无人机 Topic (SN以1开头)
+            # 用户要求：只检测到 thing/product/1581.../osd 才存表
+            # 我们不再尝试从 sub_device 中提取 SN，因为那是机场代理的特征
+            
+            if not device_sn.startswith('1'):
+                print(f"   ⚠️ [DEBUG] 设备SN不是以1开头 ({device_sn})，跳过位置存储")
+                return
+
+            print(f"   🚁 [DEBUG] 识别为无人机位置数据: {device_sn}")
+            # 检查数据结构：无人机 OSD 数据可能在 payload 的 output.ext 字段中 (AirSense 或其他事件)
+            # 但根据日志，标准 OSD 消息 topic=thing/product/{sn}/osd 通常 payload 结构扁平
+            # 日志显示 topic=thing/product/1581F8HGX255D00A0DK8/osd, bytes=3671 -> 这是标准的 OSD
+            
+            # 再次确认坐标
+            if lat is None or lon is None:
+                # 尝试从嵌套结构查找 (针对 uom_fly_data_info 等事件)
+                if 'output' in payload and 'ext' in payload['output']:
+                    ext = payload['output']['ext']
+                    lat = ext.get('latitude')
+                    lon = ext.get('longitude')
+                    alt = ext.get('height')
+                    
+                    # 🔥 修正：某些事件中的经纬度可能是整数格式（如 417281567），需要除以 10^7
+                    if lat and abs(lat) > 900:
+                        lat = lat / 1e7
+                    if lon and abs(lon) > 1800:
+                        lon = lon / 1e7
                         
-                        # 🔥 修正：某些事件中的经纬度可能是整数格式（如 417281567），需要除以 10^7
-                        if lat and abs(lat) > 900:
-                            lat = lat / 1e7
-                        if lon and abs(lon) > 1800:
-                            lon = lon / 1e7
-                            
-                        print(f"   🔄 [DEBUG] 从 output.ext 提取坐标: lat={lat}, lon={lon}")
+                    print(f"   🔄 [DEBUG] 从 output.ext 提取坐标: lat={lat}, lon={lon}")
 
                 # 保存无人机位置
                 if lat is not None and lon is not None:
