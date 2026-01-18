@@ -71,6 +71,7 @@ from .serializers import (
 
 from .filters import AlarmFilter, WaylineImageFilter
 from .permissions import IsSystemAdmin
+from .pagination import StandardResultsSetPagination
 
 
 # ======================================================================
@@ -1822,6 +1823,7 @@ class AlarmViewSet(viewsets.ModelViewSet):
     """保留你原本的 Search Fields"""
     queryset = Alarm.objects.select_related('category', 'wayline').all()
     serializer_class = AlarmSerializer
+    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = AlarmFilter
     search_fields = [

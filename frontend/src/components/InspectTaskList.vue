@@ -214,7 +214,7 @@
     <!-- 子任务对话框 -->
     <Teleport to="body">
       <div v-if="showSubTaskDialog" class="modal-overlay" @click.self="showSubTaskDialog = false">
-        <div class="modal-premium detail-modal">
+        <div class="modal-premium wide-modal">
           <div class="modal-header">
             <h3 class="modal-title">子任务列表 - 父任务 {{ currentTask?.external_task_id || currentTask?.id }}</h3>
             <button @click="showSubTaskDialog = false" class="modal-close">×</button>
@@ -225,12 +225,12 @@
               <thead>
                 <tr>
                   <th width="80">ID</th>
-                  <th width="180">外部任务ID / 文件夹</th>
-                  <th width="120">执行设备</th> <!-- 🔥 新增 -->
-                  <th width="140">航线名称</th>
+                  <th width="200">任务名</th>
+                  <th width="140">执行设备</th> <!-- 🔥 新增 -->
+                  <th width="250">航线名称</th>
                   <th width="120">检测类型</th>
-                  <th width="160">开始时间</th>
-                  <th width="160">完成时间</th>
+                  <th width="170">开始时间</th>
+                  <th width="170">完成时间</th>
                   <th width="100">状态</th>
                   <th width="120">操作</th>
                 </tr>
@@ -1076,6 +1076,14 @@ export default {
   animation: slideUp 0.3s ease;
 }
 
+.detail-modal {
+  max-width: 700px;
+}
+
+.wide-modal {
+  max-width: 1200px;
+}
+
 @keyframes slideUp {
   from {
     opacity: 0;
@@ -1133,6 +1141,7 @@ export default {
   padding: 0;
   max-height: 60vh;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .subtask-table {

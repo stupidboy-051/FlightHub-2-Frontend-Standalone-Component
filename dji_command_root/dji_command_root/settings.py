@@ -98,6 +98,8 @@ CORS_ALLOW_HEADERS = [
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,  # 默认每页显示10条记录
+    'PAGE_SIZE_QUERY_PARAM': 'page_size',  # 允许客户端通过 page_size 参数控制每页数量
+    'MAX_PAGE_SIZE': 1000,  # 限制最大每页数量，防止恶意请求
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
