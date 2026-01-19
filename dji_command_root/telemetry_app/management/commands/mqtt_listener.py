@@ -341,11 +341,17 @@ class Command(BaseCommand):
             # 用户要求：只检测到 thing/product/1581.../osd 才存表
             # 我们不再尝试从 sub_device 中提取 SN，因为那是机场代理的特征
             
-            if not device_sn.startswith('1'):
-                print(f"   ⚠️ [DEBUG] 设备SN不是以1开头 ({device_sn})，跳过位置存储")
+            # 修正变量名错误: device_sn -> sn
+            if not sn.startswith('1'):
+                print(f"   ⚠️ [DEBUG] 设备SN不是以1开头 ({sn})，跳过位置存储")
                 return
 
-            print(f"   🚁 [DEBUG] 识别为无人机位置数据: {device_sn}")
+            # 新增：Topic 严格校验 (必须是 thing/product/1... 开头)
+            if not topic.startswith('thing/product/1'):
+                print(f"   ⚠️ [DEBUG] Topic不是以thing/product/1开头 ({topic})，跳过位置存储")
+                return
+
+            print(f"   🚁 [DEBUG] 识别为无人机位置数据: {sn}")
             # 检查数据结构：无人机 OSD 数据可能在 payload 的 output.ext 字段中 (AirSense 或其他事件)
             # 但根据日志，标准 OSD 消息 topic=thing/product/{sn}/osd 通常 payload 结构扁平
             # 日志显示 topic=thing/product/1581F8HGX255D00A0DK8/osd, bytes=3671 -> 这是标准的 OSD
@@ -370,7 +376,7 @@ class Command(BaseCommand):
                 # 保存无人机位置
                 if lat is not None and lon is not None:
                     DronePosition.objects.create(
-                        device_sn=device_sn,
+                        device_sn=sn,  # 修正变量名
                         latitude=lat,
                         longitude=lon,
                         altitude=alt if alt else 0,
@@ -378,7 +384,7 @@ class Command(BaseCommand):
                         timestamp=timezone.now(),
                         mqtt_topic=topic
                     )
-                    print(f"   ✅ [DEBUG] 无人机位置写入成功！{device_sn} -> ({lat}, {lon})")
+                    print(f"   ✅ [DEBUG] 无人机位置写入成功！{sn} -> ({lat}, {lon})")
                 else:
                     print(f"   ⚠️ [DEBUG] 无法写入: 经纬度缺失 (lat={lat}, lon={lon})")
 

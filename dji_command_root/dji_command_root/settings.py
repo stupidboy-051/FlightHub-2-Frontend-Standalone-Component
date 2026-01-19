@@ -66,6 +66,10 @@ TEMPLATES = [
 ROOT_URLCONF = "dji_command_root.urls"
 WSGI_APPLICATION = "dji_command_root.wsgi.application"
 
+# Database
+# https://docs.djangoproject.com/en/5.1/ref/settings/#databases
+
+# 默认使用 SQLite（本地开发）
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -75,6 +79,17 @@ DATABASES = {
         }
     }
 }
+
+# 如果环境变量中指定了 DB_ENGINE，则使用环境变量配置（如 MySQL）
+if os.environ.get("DB_ENGINE"):
+    DATABASES["default"] = {
+        "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.mysql"),
+        "NAME": os.environ.get("DB_NAME", "dji_database"),
+        "USER": os.environ.get("DB_USER", "root"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", "root"),
+        "HOST": os.environ.get("DB_HOST", "db"),
+        "PORT": os.environ.get("DB_PORT", "3306"),
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator", },

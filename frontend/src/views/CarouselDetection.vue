@@ -114,7 +114,7 @@
                         <div class="task-meta-compact">
                           <span class="task-time">{{ formatTaskDate(task.created_at) }}</span>
                           <span class="task-divider">|</span>
-                          <span class="device-sn" v-if="task.device_sn">🚁 {{ task.device_sn }}</span>
+                          <span class="device-sn" v-if="task.device_sn">🚁 {{ getDeviceName(task.device_sn) }}</span>
                           <span class="task-divider" v-if="task.device_sn">|</span>
                           <span class="alarm-count">🚨 {{ task.alarm_count }} 个异常</span>
                         </div>
@@ -1733,6 +1733,14 @@ export default {
       }
     },
 
+    // 获取设备显示名称（映射 SN 码）
+    getDeviceName(sn) {
+      if (sn === '8UUXN4900A052C') {
+        return '工业大学无人机'
+      }
+      return sn
+    },
+
     // 格式化任务日期
     formatTaskDate(dateStr) {
       if (!dateStr) return '--'
@@ -2416,6 +2424,11 @@ export default {
   align-items: center;
   gap: 6px;
   margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.device-sn {
+  white-space: nowrap;
 }
 
 .task-side {
@@ -3045,6 +3058,7 @@ export default {
 .alarm-count {
   color: #ef4444;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 @media (max-width: 1220px) {

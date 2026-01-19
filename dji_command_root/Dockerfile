@@ -15,6 +15,8 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     && apt-get install -y --no-install-recommends \
        gcc \
        libc-dev \
+       pkg-config \
+       default-libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 5. 安装 Python 依赖
