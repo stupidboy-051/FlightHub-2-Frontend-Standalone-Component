@@ -455,6 +455,8 @@ export default {
       dockLoading: false,
       dockLoadError: '',
       dockPollTimer: null,
+      dockPollInFlight: false,
+      dockPollQueued: false,
       selectedDock: null,
       latestPositions: [],
       positionLoading: false,
@@ -1248,6 +1250,13 @@ export default {
 
     async loadDockList(silent = false) {
       if (silent && this.dockLoading) return
+      if (this.dockPollInFlight) {
+        if (silent) {
+          this.dockPollQueued = true
+        }
+        return
+      }
+      this.dockPollInFlight = true
       if (!silent) {
         this.dockLoading = true
         this.dockLoadError = ''
@@ -1293,6 +1302,11 @@ export default {
       } finally {
         if (!silent) {
           this.dockLoading = false
+        }
+        this.dockPollInFlight = false
+        if (this.dockPollQueued) {
+          this.dockPollQueued = false
+          this.loadDockList(true)
         }
       }
     },
@@ -1472,7 +1486,9 @@ export default {
       const shouldPoll = deviceSn && this.isDroneWorking(this.selectedDock)
       if (!shouldPoll) {
         this.stopPositionPolling()
-        this.clearDigitalTwinAndAlarms()
+        if (this.currentMode !== 'analysis') {
+          this.clearDigitalTwinAndAlarms()
+        }
         return
       }
       if (this.positionPollingDeviceSn && this.positionPollingDeviceSn !== deviceSn) {
