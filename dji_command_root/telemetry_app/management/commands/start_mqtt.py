@@ -282,6 +282,10 @@ class Command(BaseCommand):
     # 回调：收到消息
     # ======================================================
     def on_message(self, client, userdata, msg):
+        # 修复长时间运行导致的数据库连接丢失问题
+        from django.db import close_old_connections
+        close_old_connections()
+
         try:
             payload_bytes = msg.payload or b""
             print(f"📩 收到 MQTT 消息：topic={msg.topic}, bytes={len(payload_bytes)}")

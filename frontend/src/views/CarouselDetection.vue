@@ -318,6 +318,14 @@
               >
                 下一张
               </button>
+              <button
+                class="control-btn"
+                style="margin-left: 10px; border-color: #ff4d4f; color: #ff4d4f;"
+                @click="reportSuspicious(currentInspectImage)"
+                title="标记为存疑或误报"
+              >
+                误报反馈
+              </button>
             </div>
           </div>
         </template>
@@ -356,7 +364,8 @@ import alarmApi from '../api/alarmApi'
 import waylineApi from '../api/waylineApi'
 import waylineImageApi from '../api/waylineImageApi'
 import inspectTaskApi from '../api/inspectTaskApi'
-import { ElMessage, ElNotification } from 'element-plus'
+import suspiciousImageApi from '../api/suspiciousImageApi'
+import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
 
 export default {
   name: 'CarouselDetection',
@@ -963,6 +972,40 @@ export default {
       this.allTasksCompleted = false // 重置完成标志
       await this.startInspectPlaybackForFolder(taskOrName)
     },
+    async reportSuspicious(image) {
+      if (!image) return
+      
+      try {
+        await ElMessageBox.prompt('请填写存疑/误报原因（选填）', '误报反馈', {
+          confirmButtonText: '提交',
+          cancelButtonText: '取消',
+          inputPattern: /.*/,
+          inputPlaceholder: '例如：检测框位置不准确 / 并非目标物体'
+        }).then(async ({ value }) => {
+          // 优先使用永久路径，如果没有则使用签名URL
+          const imageUrl = image.result_url || image.url || image.path || image.result_signed_url || image.signed_url;
+          
+          const payload = {
+            image_path: imageUrl, 
+            note: value,
+            inspect_image: image.id
+          }
+          
+          await suspiciousImageApi.reportSuspiciousImage(payload)
+          ElNotification({
+            title: '反馈成功',
+            message: '已将该图片标记为存疑',
+            type: 'success'
+          })
+        })
+      } catch (error) {
+        if (error !== 'cancel') {
+          console.error(error)
+          ElMessage.error('反馈提交失败')
+        }
+      }
+    },
+
     handleWaylineChange() {
       this.activeIndex = 0
       this.stopAuto()
@@ -1415,11 +1458,17 @@ export default {
           // C. 如果有任务但不属于 A 中的航线，也需要补全 (防止漏掉数据)
 
           // Step A: 获取航线骨架 (减少 N+1，但保证结构正确)
-          const waylineRes = await waylineApi.getWaylines({
-             detect_type: category.code, 
-             page_size: 100
-          })
-          const waylines = this.normalizeList(waylineRes)
+          let waylines = []
+          if (category.code === 'unknown') {
+            // 如果是 unknown 类型，不进行航线筛选，直接获取任务
+            waylines = []
+          } else {
+            const waylineRes = await waylineApi.getWaylines({
+               detect_type: category.code, 
+               page_size: 100
+            })
+            waylines = this.normalizeList(waylineRes)
+          }
           
           const waylineMap = new Map()
           

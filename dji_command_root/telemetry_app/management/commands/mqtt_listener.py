@@ -109,6 +109,10 @@ class Command(BaseCommand):
         消息处理入口
         注意：此函数必须快速执行完毕，不能包含耗时操作（如大文件下载）
         """
+        # 修复长时间运行导致的数据库连接丢失问题
+        from django.db import close_old_connections
+        close_old_connections()
+
         try:
             payload = msg.payload.decode('utf-8')
             data = json.loads(payload)
@@ -373,20 +377,20 @@ class Command(BaseCommand):
                         
                     print(f"   🔄 [DEBUG] 从 output.ext 提取坐标: lat={lat}, lon={lon}")
 
-                # 保存无人机位置
-                if lat is not None and lon is not None:
-                    DronePosition.objects.create(
-                        device_sn=sn,  # 修正变量名
-                        latitude=lat,
-                        longitude=lon,
-                        altitude=alt if alt else 0,
-                        raw_data=data,
-                        timestamp=timezone.now(),
-                        mqtt_topic=topic
-                    )
-                    print(f"   ✅ [DEBUG] 无人机位置写入成功！{sn} -> ({lat}, {lon})")
-                else:
-                    print(f"   ⚠️ [DEBUG] 无法写入: 经纬度缺失 (lat={lat}, lon={lon})")
+            # 保存无人机位置
+            if lat is not None and lon is not None:
+                DronePosition.objects.create(
+                    device_sn=sn,  # 修正变量名
+                    latitude=lat,
+                    longitude=lon,
+                    altitude=alt if alt else 0,
+                    raw_data=data,
+                    timestamp=timezone.now(),
+                    mqtt_topic=topic
+                )
+                print(f"   ✅ [DEBUG] 无人机位置写入成功！{sn} -> ({lat}, {lon})")
+            else:
+                print(f"   ⚠️ [DEBUG] 无法写入: 经纬度缺失 (lat={lat}, lon={lon})")
 
         except Exception as e:
             # 数据库错误不应中断 MQTT 循环

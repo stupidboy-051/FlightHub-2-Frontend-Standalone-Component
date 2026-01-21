@@ -489,3 +489,52 @@ class DockStatus(models.Model):
 
     def __str__(self):
         return f"{self.dock_name or self.dock_sn} - {'在线' if self.is_online else '离线'}"
+
+
+class SuspiciousImage(models.Model):
+    """
+    存疑图片表：存储用户反馈的“误报”或“存疑”的检测结果图片
+    """
+    # 图片路径 (核心字段)
+    image_path = models.CharField(max_length=1000, verbose_name="存疑图片路径(URL)")
+
+    # 关联信息 (可选)
+    alarm = models.ForeignKey(
+        'Alarm',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='suspicious_reports',
+        verbose_name="关联告警"
+    )
+    inspect_image = models.ForeignKey(
+        'InspectImage',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='suspicious_reports',
+        verbose_name="关联原始巡检图"
+    )
+
+    # 状态管理
+    STATUS_CHOICES = [
+        ('PENDING', '待处理'),
+        ('CONFIRMED', '已确认误报'),
+        ('IGNORED', '已忽略/并非误报'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING', verbose_name="处理状态")
+    
+    # 备注 (用户可能会填，或者管理员处理时填)
+    note = models.TextField(blank=True, null=True, verbose_name="备注/原因")
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="上报时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "存疑/误报图片"
+        verbose_name_plural = "存疑/误报图片"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Suspicious {self.id} - {self.status}"
+

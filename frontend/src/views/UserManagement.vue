@@ -5,21 +5,33 @@
       <div class="header-content">
         <div class="header-left">
           <div class="header-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
             </svg>
           </div>
           <div class="header-text">
             <h1 class="page-title">人员管理</h1>
-            <p class="page-subtitle">管理系统用户账号和权限</p>
+            <p class="page-subtitle">管理系统用户及权限分配</p>
           </div>
         </div>
-        <button @click="showAddUserDialog" class="add-user-btn-premium">
-          <span class="btn-icon">+</span>
-          <span>添加用户</span>
-        </button>
+        <div class="header-actions" style="display: flex; gap: 12px;">
+          <button @click="showExportInspectDialog" class="add-user-btn-premium" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);">
+            <span class="btn-icon" style="font-size: 16px;">📊</span>
+            导出巡检报表
+          </button>
+          <button @click="exportSuspiciousImages" class="add-user-btn-premium" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);">
+            <span class="btn-icon" style="font-size: 16px;">⬇</span>
+            导出存疑记录
+          </button>
+          <button @click="showManualTaskDialog" class="add-user-btn-premium" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);">
+            <span class="btn-icon" style="font-size: 16px;">🚀</span>
+            手动检测
+          </button>
+          <button @click="showAddUserDialog" class="add-user-btn-premium">
+            <span class="btn-icon">+</span>
+            添加用户
+          </button>
+        </div>
       </div>
     </div>
 
@@ -40,8 +52,12 @@
           <div class="stat-value">{{ totalUsers }}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">当前页</div>
-          <div class="stat-value">{{ currentPage }}/{{ Math.ceil(totalUsers / pageSize) || 1 }}</div>
+          <div class="stat-label">待处理存疑</div>
+          <div class="stat-value" style="color: #fbbf24">{{ suspiciousStats.pending }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">总存疑反馈</div>
+          <div class="stat-value" style="color: #f87171">{{ suspiciousStats.total }}</div>
         </div>
       </div>
     </div>
@@ -130,6 +146,85 @@
       </div>
     </div>
 
+    <!-- 导出巡检报表对话框 -->
+    <div v-if="exportInspectDialogVisible" class="modal-overlay" @click.self="exportInspectDialogVisible = false">
+      <div class="modal-premium">
+        <div class="modal-header">
+          <h2 class="modal-title">导出巡检报表</h2>
+          <button @click="exportInspectDialogVisible = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">开始日期</label>
+            <input 
+              v-model="exportDateRange.start"
+              type="date"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">结束日期</label>
+            <input 
+              v-model="exportDateRange.end"
+              type="date"
+              class="form-input"
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="exportInspectDialogVisible = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="exportInspectImages" :disabled="isExporting" class="modal-btn primary-btn">
+            {{ isExporting ? '导出中...' : '确认导出' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 手动检测对话框 -->
+    <div v-if="manualTaskDialogVisible" class="modal-overlay" @click.self="manualTaskDialogVisible = false">
+      <div class="modal-premium">
+        <div class="modal-header">
+          <h2 class="modal-title">手动启动检测任务</h2>
+          <button @click="manualTaskDialogVisible = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">MinIO 文件夹路径 (必填)</label>
+            <input 
+              v-model="manualTaskForm.folder_path"
+              placeholder="例如: fh_sync/custom_test/20250121_bridge/"
+              class="form-input"
+            />
+            <p style="color: #64748b; font-size: 12px; margin-top: 4px;">请输入 MinIO 中存在的完整文件夹路径，需以 / 结尾</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">检测类型 (可选)</label>
+            <select v-model="manualTaskForm.category_code" class="form-select">
+              <option value="">自动识别 (从文件夹名解析)</option>
+              <option value="bridge">桥梁检测</option>
+              <option value="rail">轨道检测</option>
+              <option value="contactline">接触网检测</option>
+              <option value="protected_area">保护区检测</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">任务名称 (可选)</label>
+            <input 
+              v-model="manualTaskForm.task_name"
+              placeholder="默认自动生成"
+              class="form-input"
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="manualTaskDialogVisible = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="submitManualTask" :disabled="isStartingManualTask" class="modal-btn primary-btn">
+            {{ isStartingManualTask ? '启动中...' : '确认启动' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 添加/编辑用户对话框 -->
     <div v-if="dialogVisible" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-premium">
@@ -210,6 +305,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useStore } from 'vuex'
 import { ElMessage } from 'element-plus'
+import suspiciousImageApi from '../api/suspiciousImageApi'
+import inspectImageApi from '../api/inspectImageApi'
+import inspectTaskApi from '../api/inspectTaskApi'
 
 export default {
   name: 'UserManagement',
@@ -219,24 +317,47 @@ export default {
     
     onMounted(() => {
       loadUsers()
+      loadSuspiciousStats()
     })
     
     // 响应式数据
+    const suspiciousStats = ref({
+      total: 0,
+      pending: 0,
+      confirmed: 0,
+      ignored: 0
+    })
     const searchQuery = ref('')
     const dialogVisible = ref(false)
     const deleteDialogVisible = ref(false)
+    const exportInspectDialogVisible = ref(false)
+    const manualTaskDialogVisible = ref(false) // 手动检测弹窗
     const editingUserId = ref(null)
     const selectedUserName = ref('')
     const selectedUserId = ref(null)
     const isSubmitting = ref(false)
     const isDeleting = ref(false)
+    const isExporting = ref(false)
+    const isStartingManualTask = ref(false) // 手动检测提交状态
     const pageSizeLocal = ref(10)
     
+    const exportDateRange = ref({
+      start: '',
+      end: ''
+    })
+
     const formData = ref({
       username: '',
       name: '',
       password: '',
       role: 'user'
+    })
+
+    // 手动检测表单
+    const manualTaskForm = ref({
+      folder_path: '',
+      category_code: '',
+      task_name: ''
     })
     
     // 计算属性
@@ -409,7 +530,125 @@ export default {
       }
     }
     
+    // 存疑图片相关
+    const loadSuspiciousStats = async () => {
+      try {
+        const res = await suspiciousImageApi.getStats()
+        suspiciousStats.value = res
+      } catch (error) {
+        console.error('加载存疑统计失败:', error)
+      }
+    }
+
+    const exportSuspiciousImages = async () => {
+      try {
+        const response = await suspiciousImageApi.exportCsv()
+        // 创建下载链接
+        const url = window.URL.createObjectURL(new Blob([response]))
+        const link = document.createElement('a')
+        link.href = url
+        const now = new Date()
+        const timestamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+        link.setAttribute('download', `suspicious_images_${timestamp}.csv`)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      } catch (error) {
+        console.error('导出失败:', error)
+        ElMessage.error('导出失败')
+      }
+    }
+
+    const showExportInspectDialog = () => {
+      // 默认选中最近一个月
+      const end = new Date()
+      const start = new Date()
+      start.setMonth(start.getMonth() - 1)
+      
+      exportDateRange.value = {
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0]
+      }
+      exportInspectDialogVisible.value = true
+    }
+
+    const exportInspectImages = async () => {
+      try {
+        isExporting.value = true
+        const params = {
+          start_date: exportDateRange.value.start,
+          end_date: exportDateRange.value.end
+        }
+        
+        const response = await inspectImageApi.exportInspectImages(params)
+        
+        const url = window.URL.createObjectURL(new Blob([response]))
+        const link = document.createElement('a')
+        link.href = url
+        const now = new Date()
+        const timestamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+        link.setAttribute('download', `inspect_images_${timestamp}.csv`)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        exportInspectDialogVisible.value = false
+        ElMessage.success('导出成功')
+      } catch (error) {
+        console.error('导出失败:', error)
+        ElMessage.error('导出失败')
+      } finally {
+        isExporting.value = false
+      }
+    }
+
+    // 手动检测相关方法
+    const showManualTaskDialog = () => {
+      manualTaskForm.value = {
+        folder_path: '',
+        category_code: '',
+        task_name: ''
+      }
+      manualTaskDialogVisible.value = true
+    }
+
+    const submitManualTask = async () => {
+      if (!manualTaskForm.value.folder_path) {
+        ElMessage.error('请输入文件夹路径')
+        return
+      }
+
+      try {
+        isStartingManualTask.value = true
+        const res = await inspectTaskApi.startManualTask(manualTaskForm.value)
+        if (res.code === 200) {
+          ElMessage.success(`任务启动成功: ${res.task_id} (同步图片: ${res.image_count}张)`)
+          manualTaskDialogVisible.value = false
+        } else {
+          ElMessage.error(res.msg || '启动失败')
+        }
+      } catch (error) {
+        console.error('启动手动任务失败:', error)
+        ElMessage.error('启动失败，请检查路径是否正确')
+      } finally {
+        isStartingManualTask.value = false
+      }
+    }
+
     return {
+      suspiciousStats,
+      loadSuspiciousStats,
+      exportSuspiciousImages,
+      showExportInspectDialog,
+      exportInspectImages,
+      exportInspectDialogVisible,
+      exportDateRange,
+      isExporting,
+      manualTaskDialogVisible,
+      manualTaskForm,
+      isStartingManualTask,
+      showManualTaskDialog,
+      submitManualTask,
       searchQuery,
       dialogVisible,
       deleteDialogVisible,

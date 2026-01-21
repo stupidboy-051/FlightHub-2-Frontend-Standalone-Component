@@ -146,6 +146,17 @@ export default {
     }
   },
 
+  // 手动启动检测任务
+  async startManualTask(payload) {
+    try {
+      const response = await api.post('/start_manual_task', payload)
+      return response
+    } catch (error) {
+      console.error('启动手动检测任务失败:', error)
+      throw error
+    }
+  },
+
   // 强制结束检测任务
   async stopDetect(payload = {}) {
     try {

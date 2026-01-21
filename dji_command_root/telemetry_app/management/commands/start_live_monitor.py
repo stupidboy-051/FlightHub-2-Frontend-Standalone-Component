@@ -76,7 +76,10 @@ class Command(BaseCommand):
         s3 = get_minio_client()
 
         # 2. 循环抽帧
+        from django.db import close_old_connections
         while True:
+            # 修复长时间运行导致的数据库连接丢失问题
+            close_old_connections()
             try:
                 # 1. 动态查找流信息
                 media_list_api = f"{ZLM_API_HOST}/index/api/getMediaList"

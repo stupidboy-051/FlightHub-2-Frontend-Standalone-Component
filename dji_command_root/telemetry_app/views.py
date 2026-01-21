@@ -3,6 +3,7 @@ import mimetypes
 import os
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, wait
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,7 +41,8 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.exceptions import SuspiciousFileOperation
-from django.http import FileResponse, Http404
+import csv
+from django.http import HttpResponse, FileResponse, Http404
 from django.utils._os import safe_join
 from django.db import transaction
 from django.db.models import Count
@@ -58,7 +60,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .models import (
     Alarm, AlarmCategory, Wayline, WaylineImage,
     ComponentConfig, MediaFolderConfig, InspectTask, InspectImage, UserProfile,
-    DronePosition, FlightTaskInfo, DockStatus
+    DronePosition, FlightTaskInfo, DockStatus, SuspiciousImage
 )
 
 from .serializers import (
@@ -66,7 +68,8 @@ from .serializers import (
     WaylineImageSerializer, UserSerializer, UserCreateSerializer,
     LoginSerializer, TokenSerializer, ComponentConfigSerializer,
     MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer,
-    DronePositionSerializer, DockStatusSerializer, FlightTaskInfoSerializer
+    DronePositionSerializer, DockStatusSerializer, FlightTaskInfoSerializer,
+    SuspiciousImageSerializer
 )
 
 from .filters import AlarmFilter, WaylineImageFilter
@@ -100,18 +103,19 @@ def safe_save(instance, retries=5, delay=0.5, **kwargs):
             instance.save(**kwargs)
             return True
         except OperationalError as e:
-            if "locked" in str(e):
+            # Check for database locked error (handling both string and object)
+            error_str = str(e).lower()
+            if "locked" in error_str:
                 if attempt < retries - 1:
-                    time.sleep(delay * (attempt + 1)) # Exponential backoff
+                    # Exponential backoff with jitter
+                    import random
+                    sleep_time = delay * (2 ** attempt) + random.uniform(0, 0.1)
+                    time.sleep(sleep_time)
                     continue
+            
             print(f"❌ [DB] Save failed after {attempt+1} attempts: {e}")
-            # If it's the last attempt, we let it raise or just return False?
-            # To prevent thread crash, we better return False but log it.
-            # However, if we return False, the caller assumes it's saved.
-            # For the 'failed' status update, it's better to not crash.
             if attempt == retries - 1:
                  print(f"❌ [DB] Final save failure for {instance}: {e}")
-                 # We don't raise here to prevent thread crash in except blocks
                  return False
         except Exception as e:
             print(f"❌ [DB] Unexpected error saving {instance}: {e}")
@@ -318,7 +322,7 @@ def create_alarm_from_detection(task, img, result_data):
                 if created:
                     print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
                 else:
-                    print(f"ℹ️ [Alarm] 告警已存在，跳过创建。图片ID: {img.id}")
+                    print(f"ℹ️ [Alarm] 告警已存在 (ID: {alarm.id})，跳过创建。图片ID: {img.id}")
                 
                 # 成功则退出循环
                 break
@@ -390,7 +394,7 @@ def auto_trigger_detect1(task):
 
     for i, img in enumerate(images):
         img.detect_status = "processing"
-        img.save(update_fields=['detect_status'])
+        safe_save(img, update_fields=['detect_status'])
 
         # =================================================================
         # 🛑 旧代码注释区 (这里保持不变，以后接真实算法时用)
@@ -478,9 +482,160 @@ def auto_trigger_detect1(task):
     safe_save(task, update_fields=['detect_status', 'finished_at'])
     print(f"🏁 [Detect] 任务 {task.id} 结束.")
 
+def process_single_image(img, task, detect_url, algo_type, submit_time=None):
+    """处理单张图片的逻辑（供并发调用）"""
+    import time
+    
+    # 🔥 [Double Check] 防止队列积压导致的重复处理
+    # 如果图片已经被其他线程处理完了(status='done')，就直接跳过
+    try:
+        img.refresh_from_db()
+        if img.detect_status == 'done':
+            print(f"⏩ [Skip] 图片 {img.id} 已标记为完成，跳过重复检测")
+            return
+    except Exception:
+        # 如果查询数据库失败（例如被删了），暂不处理，继续后续逻辑尝试
+        pass
+    
+    # 🔥 计算排队时间 (如果提供了提交时间)
+    wait_cost = 0
+    if submit_time:
+        wait_cost = time.time() - submit_time
+    
+    # 1. 构造极简请求 (符合之前确认的3字段协议)
+    payload = {
+        # 1. 必填字段 (算法要的)
+        "req_id": f"req_{uuid.uuid4().hex[:8]}",  # 随机生成一个ID
+        "image_id": img.id,  # 真实的图片ID
+        "wayline_id": str(task.wayline_id) if task.wayline_id else "0",  # 转字符串
+        "timestamp": int(time.time()),  # 当前时间戳
+
+        # 2. 核心字段 (业务要的)
+        "bucket": task.bucket,
+        "object_key": img.object_key,
+        "detect_type": algo_type
+    }
+
+    # 🔥 性能监控：记录开始时间
+    detect_start_time = time.time()
+
+    try:
+        # 🔥 修复 5：增加超时时间到 600 秒（10分钟），适应 GLM-4V 模型处理速度
+        # GLM-4V 等大模型处理图片通常需要 1-2 分钟，极端情况可能更长
+        req_start = time.time()
+        resp = requests.post(detect_url, json=payload, timeout=600)
+        http_cost = time.time() - req_start
+
+        # 🔥 性能监控：记录耗时
+        elapsed_time = time.time() - detect_start_time
+        print(f"⏱️ [Detect] 图片 {img.id} 流程耗时: {elapsed_time:.2f}s (排队等待: {wait_cost:.2f}s, HTTP请求: {http_cost:.2f}s)")
+
+        # 🔥 性能警告：如果耗时过长，记录日志
+        if elapsed_time > 120:
+            print(f"⚠️ [Detect] 图片 {img.id} 检测耗时较长: {elapsed_time:.2f} 秒")
+
+        if resp.status_code == 200:
+            # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
+            # 因为算法返回的是扁平结构
+            data = resp.json()
+
+            # 🔥 增强统计：尝试获取算法服务端耗时
+            server_cost = data.get("cost_time") or data.get("inference_time") or data.get("process_time") or data.get("time_cost")
+            if server_cost:
+                try:
+                    s_cost = float(server_cost)
+                    n_cost = http_cost - s_cost
+                    print(f"🔍 [Perf] 图片 {img.id} 耗时拆解 >> 算法内部: {s_cost:.2f}s | 网络传输/排队: {n_cost:.2f}s")
+                except:
+                    pass
+
+            img.result = data
+            img.detect_status = "done"
+            safe_save(img, update_fields=['detect_status', 'result'])
+
+            algo_status = data.get("detection_status", 0)
+
+            if algo_status == 1:
+                # 只有真的是异常 (1)，才创建 Alarm 记录
+                print(f"⚠️ [Detect] 图片 {img.id} 确认为异常 (Status=1)，生成告警...")
+                create_alarm_from_detection(task, img, data)
+            else:
+                # 正常 (0)，只打印日志，不往 Alarm 表里写垃圾数据
+                print(f"✅ [Detect] 图片 {img.id} 检测通过 (Status=0).")
+        else:
+            print(f"❌ [Detect] 算法返回错误: {resp.status_code} - {resp.text}")
+
+            # 🔥 算法服务错误（5xx）可以重试，客户端错误（4xx）不重试
+            if resp.status_code >= 500 and img.retry_count < img.max_retries:
+                img.retry_count += 1
+                img.detect_status = "pending"  # 重新入队
+                print(f"🔄 [Detect] 图片 {img.id} 算法服务错误 {resp.status_code}，重试 ({img.retry_count}/{img.max_retries})")
+                time.sleep(10) # 简单避让
+                safe_save(img)
+            else:
+                img.detect_status = "failed"
+                safe_save(img, update_fields=['detect_status'])
+
+    # 🔥 修复 3：改进异常处理，区分超时、连接错误等
+    except requests.Timeout:
+        # 超时：可能是算法服务慢
+        elapsed_time = time.time() - detect_start_time
+        print(f"⏱️ [Detect] 图片 {img.id} 检测超时 ({elapsed_time:.2f} 秒)")
+
+        # 🔥 修复 4：添加重试机制
+        if img.retry_count < img.max_retries:
+            img.retry_count += 1
+            # 💡 增加冷却时间，避免立即重试再次超时
+            print(f"💤 [Detect] 图片 {img.id} 进入冷却 (30秒) 后重试...")
+            time.sleep(30)
+            img.detect_status = "pending"  # 重新入队
+            print(f"🔄 [Detect] 图片 {img.id} 冷却结束，准备重试 ({img.retry_count}/{img.max_retries})")
+        else:
+            img.detect_status = "failed"
+            print(f"❌ [Detect] 图片 {img.id} 检测超时，达到最大重试次数 ({img.max_retries})")
+        safe_save(img)
+
+    except requests.ConnectionError as conn_err:
+        # 连接错误：算法服务可能挂了
+        print(f"🔌 [Detect] 图片 {img.id} 连接算法服务失败: {conn_err}")
+
+        # 🔥 连接错误也可以重试
+        if img.retry_count < img.max_retries:
+            img.retry_count += 1
+            img.detect_status = "pending"  # 重新入队
+            print(f"🔄 [Detect] 图片 {img.id} 连接失败，重试 ({img.retry_count}/{img.max_retries})")
+        else:
+            img.detect_status = "failed"
+            print(f"❌ [Detect] 图片 {img.id} 连接失败，达到最大重试次数 ({img.max_retries})")
+        safe_save(img)
+
+    except Exception as e:
+        # 其他异常：打印完整堆栈
+        print(f"❌ [Detect] 图片 {img.id} 检测异常: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # 🔥 其他错误不重试，直接标记失败
+        img.detect_status = "failed"
+        safe_save(img)
+
+# 全局导入
+from concurrent.futures import ThreadPoolExecutor
+
+# 🔥 全局单例线程池：所有任务共享这 1 个 worker
+# 这样可以控制并发总量，且不会因为创建销毁线程池浪费资源
+# ⭐ 修正：将并发数从 4 改为 1。
+# 原因：后台算法使用 GLM-4V 等大模型，通常不支持高并发（显存限制）。
+# 如果并发发送，会导致请求在算法服务端排队，从而导致 HTTP 响应时间虚高（包含排队时间），甚至触发超时。
+# 改为串行处理后，日志记录的耗时将更接近真实的算法推理耗时。
+GLOBAL_DETECT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="GlobalDetect")
+
 def auto_trigger_detect(task):
-    """自动检测全流程 (适配真实算法协议版 + 持续检测新图)"""
-    # 🔥 使用任务级别的锁防止并发启动
+    """
+    [异步非阻塞版] 自动检测调度器
+    只负责将任务分发给全局线程池，不再同步等待结果。
+    """
+    # 🔥 使用任务级别的锁防止并发启动 (依然需要，防止重复提交同一批图片)
     lock_key = f"detect_task_{task.id}"
     from django.core.cache import cache
 
@@ -488,154 +643,66 @@ def auto_trigger_detect(task):
     lock_acquired = cache.add(lock_key, True, timeout=600)
 
     if not lock_acquired:
-        print(f"⏸️  [Detect] 任务 {task.id} 已有检测线程在运行，跳过")
+        print(f"⏸️  [Detect] 任务 {task.id} 已有检测分发正在进行，跳过")
         return
 
     try:
-        # 🔥 循环检测：持续处理所有 pending 图片
-        while True:
-            # 🔥 查询所有 pending 状态的图片
-            images = task.images.filter(detect_status="pending").order_by("id")
-            if not images.exists():
-                print(f"⏸️  [Detect] 任务 {task.id} 暂无待检测图片，结束检测")
-                break
+        # 🔥 第一步：先锁定并获取 ID，而不是直接 Update
+        # 这一步至关重要，因为一旦 Update 之后，就再也查不到 pending 的图了！
+        pending_qs = task.images.filter(detect_status="pending").order_by("id")
+        
+        # 如果没有图片，直接退出
+        if not pending_qs.exists():
+            return
+            
+        # 拿到 ID 列表（内存暂存）
+        target_ids = list(pending_qs.values_list('id', flat=True))
+        if not target_ids:
+            return
 
-            # 🔥 防止重复检测：立即将所有 pending 图片标记为 processing（原子操作）
-            updated_count = task.images.filter(detect_status="pending").update(detect_status="processing")
-            if updated_count > 0:
-                print(f"🔒 [Detect] 任务 {task.id} 锁定 {updated_count} 张图片，开始检测...")
-
-            # 重新查询（现在已经是 processing 状态了）
-            images = task.images.filter(detect_status="processing").order_by("id")
-
-            # 🔥 修改：只有第一次启动时才更新 started_at
+        # 🔥 第二步：原子更新
+        # 只更新刚才查到的那些 ID，防止并发问题
+        updated_count = task.images.filter(id__in=target_ids).update(detect_status="processing")
+        
+        if updated_count > 0:
+            print(f"🚀 [Async] 任务 {task.id} 将 {updated_count} 张图片提交至后台队列...")
+            
+            # 🔥 第三步：根据 ID 列表获取对象并分发
+            # 这里的 processing_images 绝对不会包含以前的积压任务，只包含本次 update 成功的
+            processing_images = task.images.filter(id__in=target_ids)
+            
+            # 🔥 仅首次更新任务开始时间
             if not task.started_at:
                 task.started_at = django_timezone.now()
                 safe_save(task, update_fields=['started_at'])
 
-            # 🔥 关键：不改变任务状态，保持 scanning 让轮询继续扫描新图
-
             detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8088/detect")
             algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
 
-            # 🔥 提前导入 time 模块，避免循环内重复导入
-            import time
-
-            for img in images:
-                # 🔥 注意：不再需要 refresh_from_db()
-                # 因为在函数开始时已经通过任务锁 + 批量更新锁定图片
-                # 直接检测即可，避免竞态条件导致跳过检测
-
-                # 1. 构造极简请求 (符合之前确认的3字段协议)
-                payload = {
-                    # 1. 必填字段 (算法要的)
-                    "req_id": f"req_{uuid.uuid4().hex[:8]}",  # 随机生成一个ID
-                    "image_id": img.id,  # 真实的图片ID
-                    "wayline_id": str(task.wayline_id) if task.wayline_id else "0",  # 转字符串
-                    "timestamp": int(time.time()),  # 当前时间戳
-
-                    # 2. 核心字段 (业务要的)
-                    "bucket": task.bucket,
-                    "object_key": img.object_key,
-                    "detect_type": algo_type
-                }
-
-                # 🔥 性能监控：记录开始时间
-                detect_start_time = time.time()
-
-                try:
-                    # 🔥 修复 5：增加超时时间到 180 秒（3分钟），适应 GLM-4V 模型处理速度
-                    # GLM-4V 等大模型处理图片通常需要 1-2 分钟
-                    resp = requests.post(detect_url, json=payload, timeout=180)
-
-                    # 🔥 性能监控：记录耗时
-                    elapsed_time = time.time() - detect_start_time
-                    print(f"⏱️ [Detect] 图片 {img.id} 检测耗时: {elapsed_time:.2f} 秒")
-
-                    # 🔥 性能警告：如果耗时过长，记录日志
-                    if elapsed_time > 120:
-                        print(f"⚠️ [Detect] 图片 {img.id} 检测耗时较长: {elapsed_time:.2f} 秒")
-
-                    if resp.status_code == 200:
-                        # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
-                        # 因为算法返回的是扁平结构
-                        data = resp.json()
-
-                        img.result = data
-                        img.detect_status = "done"
-                        safe_save(img, update_fields=['detect_status', 'result'])
-
-                        algo_status = data.get("detection_status", 0)
-
-                        if algo_status == 1:
-                            # 只有真的是异常 (1)，才创建 Alarm 记录
-                            print(f"⚠️ [Detect] 图片 {img.id} 确认为异常 (Status=1)，生成告警...")
-                            create_alarm_from_detection(task, img, data)
-                        else:
-                            # 正常 (0)，只打印日志，不往 Alarm 表里写垃圾数据
-                            print(f"✅ [Detect] 图片 {img.id} 检测通过 (Status=0).")
-                    else:
-                        print(f"❌ [Detect] 算法返回错误: {resp.status_code} - {resp.text}")
-
-                        # 🔥 算法服务错误（5xx）可以重试，客户端错误（4xx）不重试
-                        if resp.status_code >= 500 and img.retry_count < img.max_retries:
-                            img.retry_count += 1
-                            img.detect_status = "pending"  # 重新入队
-                            print(f"🔄 [Detect] 图片 {img.id} 算法服务错误 {resp.status_code}，重试 ({img.retry_count}/{img.max_retries})")
-                            safe_save(img)
-                        else:
-                            img.detect_status = "failed"
-                            safe_save(img, update_fields=['detect_status'])
-
-                # 🔥 修复 3：改进异常处理，区分超时、连接错误等
-                except requests.Timeout:
-                    # 超时：可能是算法服务慢
-                    elapsed_time = time.time() - detect_start_time
-                    print(f"⏱️ [Detect] 图片 {img.id} 检测超时 ({elapsed_time:.2f} 秒)")
-
-                    # 🔥 修复 4：添加重试机制
-                    if img.retry_count < img.max_retries:
-                        img.retry_count += 1
-                        img.detect_status = "pending"  # 重新入队
-                        print(f"🔄 [Detect] 图片 {img.id} 检测超时，重试 ({img.retry_count}/{img.max_retries})")
-                    else:
-                        img.detect_status = "failed"
-                        print(f"❌ [Detect] 图片 {img.id} 检测超时，达到最大重试次数 ({img.max_retries})")
-                    safe_save(img)
-
-                except requests.ConnectionError as conn_err:
-                    # 连接错误：算法服务可能挂了
-                    print(f"🔌 [Detect] 图片 {img.id} 连接算法服务失败: {conn_err}")
-
-                    # 🔥 连接错误也可以重试
-                    if img.retry_count < img.max_retries:
-                        img.retry_count += 1
-                        img.detect_status = "pending"  # 重新入队
-                        print(f"🔄 [Detect] 图片 {img.id} 连接失败，重试 ({img.retry_count}/{img.max_retries})")
-                    else:
-                        img.detect_status = "failed"
-                        print(f"❌ [Detect] 图片 {img.id} 连接失败，达到最大重试次数 ({img.max_retries})")
-                    safe_save(img)
-
-                except Exception as e:
-                    # 其他异常：打印完整堆栈
-                    print(f"❌ [Detect] 图片 {img.id} 检测异常: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-                    # 🔥 其他错误不重试，直接标记失败
-                    img.detect_status = "failed"
-                    safe_save(img)
-
-            # 🔥 本轮检测完成
-            print(f"✅ [Detect] 任务 {task.id} 本轮检测完成 ({len(images)}张)")
-
-            # 🔥 循环继续：回到 while True，检查是否有新的 pending 图片
+            # 🔥 核心修改：异步提交任务，不等待 (No Wait)
+            # 💡 优化：由于我们改为了单线程执行 (max_workers=1)，
+            # 如果一次性提交太多任务，后面的任务会排队很久，导致“排队时间”很长。
+            # 但这对系统稳定性有好处，避免了并发请求压垮算法服务。
+            # 只要 Poller 是单线程触发的，这里其实就是顺序入队。
+            current_batch_submit_time = time.time()
+            for img in processing_images:
+                # submit 是非阻塞的，瞬间完成
+                GLOBAL_DETECT_EXECUTOR.submit(
+                    process_single_image, 
+                    img, 
+                    task, 
+                    detect_url, 
+                    algo_type,
+                    current_batch_submit_time  # 所有图片共用同一个批次提交时间
+                )
+            
+            print(f"✅ [Async] 任务 {task.id} 分发完成，后台正在处理中...")
 
     finally:
         # 🔥 释放锁
+        # 注意：这里的锁只锁“分发过程”，不锁“执行过程”
+        # 所以分发完立刻释放，允许 Poller 继续扫描该任务的新图片
         cache.delete(lock_key)
-        print(f"🔓 [Detect] 任务 {task.id} 释放检测锁")
 
 
 # ======================================================================
@@ -903,7 +970,7 @@ def minio_poller_worker():
                         # 更新 external_task_id 为中文名，方便看
                         if created and api_data["name"]:
                             task.external_task_id = api_data["name"]
-                        task.save()
+                        safe_save(task)
                         print(f"🔄 [API Sync] 任务 {task.external_task_id} 状态更新: {task.dji_status}")
 
                 # =========================================================
@@ -964,14 +1031,14 @@ def minio_poller_worker():
                                 f"✅ [Task Done] 任务 {task.external_task_id} 已静默 {int(minutes_silent)} 分钟，自动结束。")
                             task.detect_status = "done"
                             task.finished_at = django_timezone.now()
-                            task.save()
+                            safe_save(task)
                         else:
                             # 还在静默期内（可能在换电池）
                             # print(f"⏳ [Waiting] 任务 {task.external_task_id} 等待中 (静默 {int(minutes_silent)}m / {SILENCE_TIMEOUT_MINUTES}m)")
                             pass
-                    else:
-                        # 极端情况：还没收到过图片，先不管
-                        pass
+                else:
+                    # 极端情况：还没收到过图片，先不管
+                    pass
 
             # =========================================================
             # 🔥 新增：处理固定命名格式的文件夹
@@ -1043,7 +1110,7 @@ def minio_poller_worker():
                         print(f"🚀 [Re-open Fixed] 任务 {task_id} 收到新图，重新标记为处理中...")
                         task.detect_status = "processing"
 
-                    task.save()
+                    safe_save(task)
                     print(f"📸 [Fixed Folder] 任务 {task_id} 同步了 {new_images_count} 张新图")
 
                 # 检查是否有待检测图片
@@ -1244,12 +1311,23 @@ def minio_poller_worker1231():
                         # 🔥 新增：检查父任务，如果所有子任务都完成了，同步父任务状态
                         if task.parent_task:
                             parent = task.parent_task
+                            # 重新从数据库获取最新的父任务，避免缓存
+                            parent.refresh_from_db()
+                            # 检查所有子任务是否都已完成
                             all_sub_done = not parent.sub_tasks.exclude(detect_status='done').exists()
                             if all_sub_done and parent.detect_status != 'done':
                                 parent.detect_status = 'done'
                                 parent.finished_at = django_timezone.now()
                                 safe_save(parent, update_fields=['detect_status', 'finished_at'])
                                 print(f"🎉 [Poller] 父任务 {parent.external_task_id} 所有子任务完成，标记为完成")
+                                
+                        # 🔥 新增：如果是未分类/手动任务（手动检测模式创建的任务），且子任务完成了，自动标记子任务为 done
+                        # 这种情况通常是 dji_task_uuid 就是 external_task_id，或者是 start_manual_task 创建的
+                        if not task.detect_category and task.images.count() > 0:
+                             print(f"✅ [Manual Task] 手动任务 {task.external_task_id} 检测完成")
+                             # 这里的逻辑已经在上面 task.detect_status = 'done' 处理了，
+                             # 但如果是手动任务，我们可能希望更激进地确保它结束，避免长时间 scanning
+                             pass
                     else:
                         print(f"⏳ [Poller] 任务 {task.external_task_id} 还有 {processing_cnt} 张图片正在检测中...")
 
@@ -1283,7 +1361,12 @@ def minio_poller_worker2():
     # 设为 60 分钟，覆盖无人机换电时间（通常30-40分钟）
     SILENCE_TIMEOUT_MINUTES = 60 
 
+    from django.db import close_old_connections
+
     while True:
+        # 修复长时间运行导致的数据库连接丢失问题
+        close_old_connections()
+        
         try:
             # =========================================================
             # 第一步：发现 MinIO 里的所有“子任务文件夹”
@@ -1515,6 +1598,15 @@ def minio_poller_worker2():
                         # 3. 自动触发检测 (对新图片)
                         #    注意：auto_trigger_detect 内部会找 pending 的图片进行检测
                         threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
+                    else:
+                        # 🔥 修复：即使没有新图片，也要检查是否有挂起的任务需要处理
+                        # 避免因为 sync_images_core 返回 0 而导致之前的 pending 图片卡死
+                        # (例如服务重启、或之前的检测请求丢失)
+                        pending_count = target_task.images.filter(detect_status="pending").count()
+                        if pending_count > 0:
+                             # 为了避免日志刷屏，可以只在真的触发时打印
+                             # print(f"🔄 [Retry] 任务 {target_task.external_task_id} 发现 {pending_count} 张挂起图片，强制触发检测...")
+                             threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
 
             # =========================================================
             # 第四步：全局超时判断 (处理无人机充电/结束的情况)
@@ -1630,6 +1722,19 @@ def minio_poller_worker1():
                         inspect_task=task,
                         detect_status__in=['pending', 'processing']
                     ).count()
+                    
+                    if unfinished_cnt > 0:
+                        # 🔥 修复：如果还有 pending 的图，强制触发一下检测（防卡死）
+                        pending_only = InspectImage.objects.filter(
+                            inspect_task=task,
+                            detect_status='pending'
+                        ).count()
+                        if pending_only > 0:
+                            # 只有当没有新图的时候，才去管 pending 的
+                            # 如果刚刚已经触发了 (new_images_count > 0)，这里就不要再触发了
+                            if new_images_count == 0:
+                                # print(f"🔄 [Retry] 任务 {task.external_task_id} 发现 {pending_only} 张挂起图片，强制触发检测...")
+                                threading.Thread(target=auto_trigger_detect, args=(task,)).start()
 
                     if unfinished_cnt == 0:
                         print(f"✅ [Poller] 任务 {task.external_task_id} 已无新图且处理完毕，自动结束扫描。")
@@ -1755,13 +1860,13 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
 
         task.detect_status = "scanning"
         task.started_at = django_timezone.now()
-        task.save(update_fields=["detect_status", "started_at"])
+        safe_save(task, update_fields=["detect_status", "started_at"])
 
         # 🔥 新增：如果是子任务，同步父任务状态
         if task.parent_task and task.parent_task.detect_status == "pending":
             task.parent_task.detect_status = "scanning"
             task.parent_task.started_at = django_timezone.now()
-            task.parent_task.save(update_fields=["detect_status", "started_at"])
+            safe_save(task.parent_task, update_fields=["detect_status", "started_at"])
             print(f"🚀 [Start] 父任务 {task.parent_task.external_task_id} 状态同步为 scanning")
 
         return Response(InspectTaskSerializer(task).data)
@@ -2207,6 +2312,88 @@ class MediaLibraryViewSet(viewsets.ViewSet):
         response = FileResponse(open(full_path, 'rb'))
         mime_type, _ = mimetypes.guess_type(full_path)
         if mime_type: response["Content-Type"] = mime_type
+        return response
+
+
+class InspectImageViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    巡检图片视图集
+    """
+    queryset = InspectImage.objects.all().order_by('-created_at')
+    serializer_class = InspectImageSerializer
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """
+        导出巡检图片列表为 CSV，支持按日期筛选
+        Query Params: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
+        """
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        
+        queryset = self.get_queryset()
+        
+        if start_date:
+            try:
+                start = datetime.strptime(start_date, '%Y-%m-%d')
+                queryset = queryset.filter(created_at__date__gte=start.date())
+            except ValueError:
+                pass
+                
+        if end_date:
+            try:
+                end = datetime.strptime(end_date, '%Y-%m-%d')
+                queryset = queryset.filter(created_at__date__lte=end.date())
+            except ValueError:
+                pass
+        
+        response = HttpResponse(content_type='text/csv')
+        filename = f"inspect_images_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.write('\ufeff'.encode('utf8'))  # BOM for Excel compatibility
+
+        writer = csv.writer(response)
+        # 表头: 图片路径（object_key) 检测类型 以及相应体中的visible_items fault_items
+        writer.writerow(['Image Path', 'Detection Type', 'Visible Items', 'Fault Items', 'Created At'])
+
+        for img in queryset:
+            result = img.result or {}
+            
+            # Extract fields
+            object_key = img.object_key
+            
+            # Detection Type / Status
+            # 1 = Defect Found; 0 = No Defect Found
+            status_code = result.get('detection_status')
+            if status_code == 1:
+                detect_status = "Defect Found"
+            elif status_code == 0:
+                detect_status = "No Defect Found"
+            else:
+                detect_status = str(status_code) if status_code is not None else ""
+
+            # Visible Items
+            visible_items = result.get('visible_items')
+            if isinstance(visible_items, list):
+                visible_str = ", ".join(str(x) for x in visible_items)
+            else:
+                visible_str = str(visible_items) if visible_items is not None else ""
+
+            # Fault Items
+            fault_items = result.get('fault_items')
+            if isinstance(fault_items, list):
+                fault_str = ", ".join(str(x) for x in fault_items)
+            else:
+                fault_str = str(fault_items) if fault_items is not None else ""
+
+            writer.writerow([
+                object_key,
+                detect_status,
+                visible_str,
+                fault_str,
+                img.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            ])
+            
         return response
 
 
@@ -2977,6 +3164,128 @@ def parse_folder_name(folder_name):
 
     # 3. 实在解析不出来，就默认“今天”
     return datetime.now().strftime("%Y-%m-%d"), folder_name
+
+
+@csrf_exempt
+def start_manual_task(request):
+    """
+    [API] 手动启动检测任务 (不依赖指纹)
+    输入:
+    {
+        "folder_path": "fh_sync/manual_test/bridge_01/",
+        "category_code": "bridge",  # 可选，如果不传则尝试从路径解析
+        "task_name": "手动测试01"    # 可选
+    }
+    """
+    if request.method != 'POST':
+        return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
+
+    try:
+        body = json.loads(request.body)
+        folder_path = body.get("folder_path")
+        category_code = body.get("category_code")
+        task_name = body.get("task_name")
+
+        if not folder_path:
+            return JsonResponse({"code": 400, "msg": "folder_path is required"})
+
+        # 规范化路径
+        if not folder_path.endswith('/'):
+            folder_path += '/'
+
+        s3 = get_minio_client()
+        bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+
+        # 1. 检查路径是否存在 (列举该前缀下的对象)
+        resp = s3.list_objects_v2(Bucket=bucket_name, Prefix=folder_path, MaxKeys=1)
+        if 'Contents' not in resp:
+            return JsonResponse({"code": 404, "msg": f"Folder not found in MinIO: {folder_path}"})
+
+        # 2. 如果未提供分类，尝试解析
+        if not category_code:
+            # 使用 parse_folder_name 解析最后一级目录名
+            folder_name = folder_path.strip('/').split('/')[-1]
+            date_str, type_str = parse_folder_name(folder_name)
+            
+            # 简单的关键字映射
+            type_lower = type_str.lower()
+            if "bridge" in type_lower or "桥" in type_lower:
+                category_code = "bridge"
+            elif "rail" in type_lower or "轨道" in type_lower:
+                category_code = "rail"
+            elif "contact" in type_lower or "绝缘" in type_lower:
+                category_code = "contactline"
+            elif "protect" in type_lower or "保护" in type_lower:
+                category_code = "protected_area"
+            else:
+                category_code = "unknown"
+
+        # 3. 获取或创建分类
+        category_obj = None
+        if category_code:
+            category_obj = AlarmCategory.objects.filter(code=category_code).first()
+            if not category_obj:
+                category_obj = AlarmCategory.objects.create(
+                    name=f"{category_code}检测(手动)",
+                    code=category_code
+                )
+
+        # 4. 创建任务
+        # 使用 folder_path 作为唯一标识的一部分，或者生成一个 unique ID
+        task_uuid = f"manual_{uuid.uuid4().hex[:8]}"
+        
+        if not task_name:
+            folder_name = folder_path.strip('/').split('/')[-1]
+            task_name = f"手动检测_{folder_name}_{datetime.now().strftime('%H%M%S')}"
+
+        # 创建父任务 (为了保持结构一致，虽然手动任务可能不需要复杂的父子结构，但为了兼容列表显示)
+        today_str = datetime.now().strftime('%Y%m%d')
+        parent_task_id = f"{today_str}手动任务"
+        parent_task, _ = InspectTask.objects.get_or_create(
+            external_task_id=parent_task_id,
+            defaults={
+                "detect_status": "pending",
+                "bucket": bucket_name,
+                "prefix_list": []
+            }
+        )
+
+        task = InspectTask.objects.create(
+            parent_task=parent_task,
+            external_task_id=task_name,
+            dji_task_name=task_name,
+            dji_task_uuid=task_uuid, # 伪造一个 UUID
+            bucket=bucket_name,
+            prefix_list=[folder_path],
+            detect_category=category_obj,
+            detect_status="scanning",
+            started_at=django_timezone.now(),
+            wayline=category_obj.wayline if category_obj else None
+        )
+
+        print(f"🚀 [Manual] 创建手动任务: {task_name} | 路径: {folder_path} | 分类: {category_code}")
+
+        # 5. 同步图片
+        new_images_count = sync_images_core(task)
+        print(f"📸 [Manual] 同步图片: {new_images_count} 张")
+
+        # 6. 触发检测
+        if new_images_count > 0:
+             threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+
+        return JsonResponse({
+            "code": 200,
+            "msg": "Manual task started",
+            "task_id": task.id,
+            "image_count": new_images_count,
+            "category": category_obj.name if category_obj else "Unknown"
+        })
+
+    except Exception as e:
+        print(f"❌ [Manual Error] {e}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"code": 500, "msg": str(e)})
 
 
 @csrf_exempt
@@ -3981,4 +4290,60 @@ class DockStatusViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(dock)
         return Response(serializer.data)
+
+
+class SuspiciousImageViewSet(viewsets.ModelViewSet):
+    """
+    存疑/误报图片管理接口
+    """
+    queryset = SuspiciousImage.objects.all()
+    serializer_class = SuspiciousImageSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['status', 'alarm', 'inspect_image']
+    ordering_fields = ['created_at', 'status']
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """
+        统计各状态的存疑图片数量
+        """
+        total = SuspiciousImage.objects.count()
+        pending = SuspiciousImage.objects.filter(status='PENDING').count()
+        confirmed = SuspiciousImage.objects.filter(status='CONFIRMED').count()
+        ignored = SuspiciousImage.objects.filter(status='IGNORED').count()
+        
+        return Response({
+            "total": total,
+            "pending": pending,
+            "confirmed": confirmed,
+            "ignored": ignored
+        })
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """
+        导出存疑图片列表为 CSV
+        """
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="suspicious_images_{datetime.now().strftime("%Y%m%d%H%M%S")}.csv"'
+        response.write('\ufeff'.encode('utf8'))  # BOM (Optional, for Excel compatibility)
+
+        writer = csv.writer(response)
+        writer.writerow(['ID', 'Image Path', 'Status', 'Note', 'Created At', 'Alarm ID', 'Inspect Image ID'])
+
+        images = SuspiciousImage.objects.all().order_by('-created_at')
+        for img in images:
+            writer.writerow([
+                img.id,
+                img.image_path,
+                img.get_status_display(),
+                img.note,
+                img.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                img.alarm_id if img.alarm_id else '',
+                img.inspect_image_id if img.inspect_image_id else ''
+            ])
+
+        return response
+
 
