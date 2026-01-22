@@ -386,7 +386,7 @@ initCesiumMap() {
   // 1. 获取正确的 IP
   const hostname = window.location.hostname;
   // 2. 拼接地址 (请确认你的 style 名字是不是 basic-preview)
-  const tileUrl = `http://${hostname}:7777/data/shenyang3/{z}/{x}/{y}.png`;
+  const tileUrl = `http://${hostname}:7777/services/shenyang3/tiles/{z}/{x}/{y}.png`;
   
   console.log('>>> [调试] 地图服务地址:', tileUrl);
 
