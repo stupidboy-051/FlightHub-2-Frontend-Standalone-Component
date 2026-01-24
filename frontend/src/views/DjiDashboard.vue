@@ -522,6 +522,8 @@ export default {
     this.waylineEntity = null
     this.waylinePointEntities = []
     this.droneEntity = null
+    this.dronePositionProperty = null
+    this.droneOrientationProperty = null
     this.lastDroneCartesian = null
     this.invertedTriangleImage = null
     this.alertTriangleIconCache = {}
@@ -885,7 +887,7 @@ export default {
         // 只有无人机存在且在显示时才跟随
         if (!entity || !entity.show) return;
 
-        const time = Cesium.JulianDate.now();
+        const time = this.viewer?.clock?.currentTime || Cesium.JulianDate.now();
 
         // 获取当前时刻的位置和朝向
         const position = entity.position?.getValue(time);
@@ -1028,7 +1030,8 @@ export default {
       this.viewer.trackedEntity = undefined;
 
       if (this.droneEntity?.position) {
-        const position = this.droneEntity.position.getValue(Cesium.JulianDate.now());
+        const time = this.viewer?.clock?.currentTime || Cesium.JulianDate.now();
+        const position = this.droneEntity.position.getValue(time);
         if (position) {
           this.updateBirdCameraFromCartesian(position);
         }
@@ -1563,7 +1566,8 @@ export default {
       if (!Cesium) return
 
       const timestamp = this.getPositionTimestamp(position)
-      if (Number.isFinite(timestamp) && this.lastDroneTimestamp && timestamp <= this.lastDroneTimestamp) {
+      if (!Number.isFinite(timestamp)) return
+      if (Number.isFinite(this.lastDroneTimestamp) && timestamp <= this.lastDroneTimestamp) {
         return
       }
 
@@ -1573,11 +1577,46 @@ export default {
       if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return
       const altitude = Number.isFinite(payload.altitude) ? payload.altitude : 0
       const cartesian = Cesium.Cartesian3.fromDegrees(longitude, latitude, altitude)
+      const sampleTime = Cesium.JulianDate.fromDate(new Date(timestamp))
+
+      if (!this.dronePositionProperty) {
+        this.dronePositionProperty = new Cesium.SampledPositionProperty()
+        this.dronePositionProperty.setInterpolationOptions({
+          interpolationDegree: 1,
+          interpolationAlgorithm: Cesium.LinearApproximation
+        })
+        this.dronePositionProperty.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+        this.dronePositionProperty.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+      }
+
+      if (!this.droneOrientationProperty) {
+        this.droneOrientationProperty = new Cesium.SampledProperty(Cesium.Quaternion)
+        this.droneOrientationProperty.setInterpolationOptions({
+          interpolationDegree: 1,
+          interpolationAlgorithm: Cesium.LinearApproximation
+        })
+        this.droneOrientationProperty.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+        this.droneOrientationProperty.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+      }
+
+      this.dronePositionProperty.addSample(sampleTime, cartesian)
+
+      const resolvedHeading = this.resolveDroneHeading(payload.heading, cartesian)
+      const heading = Number.isFinite(resolvedHeading) ? resolvedHeading : 0
+      const pitch = Number.isFinite(payload.pitch) ? payload.pitch : 0
+      const roll = Number.isFinite(payload.roll) ? payload.roll : 0
+      const modelHeadingOffset = Cesium.Math.toRadians(-90)
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        cartesian,
+        new Cesium.HeadingPitchRoll(heading + modelHeadingOffset, pitch, roll)
+      )
+      this.droneOrientationProperty.addSample(sampleTime, orientation)
 
       if (!this.droneEntity) {
         this.droneEntity = this.viewer.entities.add({
           name: '无人机',
-          position: cartesian,
+          position: this.dronePositionProperty,
+          orientation: this.droneOrientationProperty,
           model: {
             uri: '/models/fly.glb',
             minimumPixelSize: 128,
@@ -1587,23 +1626,24 @@ export default {
           }
         })
       } else {
-        this.droneEntity.position = cartesian
+        if (this.droneEntity.position !== this.dronePositionProperty) {
+          this.droneEntity.position = this.dronePositionProperty
+        }
+        if (this.droneEntity.orientation !== this.droneOrientationProperty) {
+          this.droneEntity.orientation = this.droneOrientationProperty
+        }
       }
 
-      const heading = this.resolveDroneHeading(payload.heading, cartesian)
-      if (Number.isFinite(heading)) {
-        const modelHeadingOffset = Cesium.Math.toRadians(-90)
-        this.droneEntity.orientation = Cesium.Transforms.headingPitchRollQuaternion(
-          cartesian,
-          new Cesium.HeadingPitchRoll(heading + modelHeadingOffset, 0, 0)
-        )
-      }
-
-      if (Number.isFinite(timestamp)) {
-        this.lastDroneTimestamp = timestamp
-      }
+      this.lastDroneTimestamp = timestamp
       this.lastDronePosition = { longitude, latitude, altitude }
       this.lastDroneCartesian = cartesian
+
+      const clock = this.viewer.clock
+      if (clock) {
+        const renderTime = Cesium.JulianDate.addSeconds(sampleTime, -3, new Cesium.JulianDate())
+        clock.currentTime = renderTime
+        clock.shouldAnimate = true
+      }
 
       if (this.cameraMode === 'bird') {
         this.updateBirdCameraFromCoords(longitude, latitude, altitude)
@@ -1613,7 +1653,20 @@ export default {
     },
     extractPositionData(position) {
       const rawData = this.parseRawData(position?.raw_data)
-      const raw = rawData?.position || rawData?.location || rawData || {}
+      const rawDataPayload = rawData?.data ? this.parseRawData(rawData.data) : null
+      const directPayload = position?.data ? this.parseRawData(position.data) : null
+      const raw =
+        rawData?.position ||
+        rawData?.location ||
+        rawDataPayload?.position ||
+        rawDataPayload?.location ||
+        directPayload?.position ||
+        directPayload?.location ||
+        rawDataPayload ||
+        directPayload ||
+        rawData ||
+        {}
+      const toRadians = (value) => (Number.isFinite(value) ? value * (Math.PI / 180) : NaN)
       const longitude = this.toNumber(
         position?.longitude ?? position?.lon ?? position?.lng ?? raw.longitude ?? raw.lon ?? raw.lng
       )
@@ -1630,15 +1683,33 @@ export default {
         raw.relative_height ??
         raw.ellipsoid_height
       )
-      const heading = this.toNumber(
-        position?.heading ??
-        position?.yaw ??
-        position?.aircraft_heading ??
-        raw.heading ??
-        raw.yaw ??
-        raw.aircraft_heading
+      const attitudeHead = this.toNumber(
+        position?.attitude_head ??
+        position?.attitude_heading ??
+        position?.attitude_yaw ??
+        raw.attitude_head ??
+        raw.attitude_heading ??
+        raw.attitude_yaw
       )
-      return { longitude, latitude, altitude, heading }
+      const heading = Number.isFinite(attitudeHead)
+        ? toRadians(attitudeHead)
+        : this.toNumber(
+          position?.heading ??
+          position?.yaw ??
+          position?.aircraft_heading ??
+          raw.heading ??
+          raw.yaw ??
+          raw.aircraft_heading
+        )
+      const pitchRaw = this.toNumber(
+        position?.attitude_pitch ?? position?.pitch ?? raw.attitude_pitch ?? raw.pitch
+      )
+      const rollRaw = this.toNumber(
+        position?.attitude_roll ?? position?.roll ?? raw.attitude_roll ?? raw.roll
+      )
+      const pitch = Number.isFinite(pitchRaw) ? toRadians(pitchRaw) : NaN
+      const roll = Number.isFinite(rollRaw) ? toRadians(rollRaw) : NaN
+      return { longitude, latitude, altitude, heading, pitch, roll }
     },
     parseRawData(raw) {
       if (!raw) return null
@@ -1652,6 +1723,8 @@ export default {
     },
     getPositionTimestamp(position) {
       const rawData = this.parseRawData(position?.raw_data)
+      const rawDataPayload = rawData?.data ? this.parseRawData(rawData.data) : null
+      const directPayload = position?.data ? this.parseRawData(position.data) : null
       const candidates = [
         position?.timestamp,
         position?.created_at,
@@ -1660,7 +1733,13 @@ export default {
         position?.ts,
         rawData?.timestamp,
         rawData?.time,
-        rawData?.ts
+        rawData?.ts,
+        rawDataPayload?.timestamp,
+        rawDataPayload?.time,
+        rawDataPayload?.ts,
+        directPayload?.timestamp,
+        directPayload?.time,
+        directPayload?.ts
       ]
       for (const candidate of candidates) {
         const normalized = this.normalizeTimestamp(candidate)
@@ -2439,6 +2518,8 @@ export default {
       this.lastDroneHeading = null;
       this.lastDronePosition = null;
       this.lastDroneCartesian = null;
+      this.dronePositionProperty = null;
+      this.droneOrientationProperty = null;
     },
 
     clearDigitalTwin() {
