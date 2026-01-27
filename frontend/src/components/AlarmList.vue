@@ -51,7 +51,6 @@
         <thead>
           <tr>
             <th width="80">ID</th>
-            <th width="100">航线ID</th>
             <th width="150">航线名称</th>
             <th width="180">时间</th>
             <th width="120">类型</th>
@@ -63,13 +62,12 @@
         </thead>
         <tbody>
           <tr v-if="filteredAlarms.length === 0">
-            <td colspan="9" class="empty-row">暂无告警数据</td>
+            <td colspan="8" class="empty-row">暂无告警数据</td>
           </tr>
           <tr v-for="alarm in filteredAlarms" :key="alarm.id" class="alarm-row">
             <td>
               <span class="id-badge">{{ alarm.id }}</span>
             </td>
-            <td>{{ getWaylineId(alarm) }}</td>
             <td>{{ getWaylineName(alarm) }}</td>
             <td>
               <span class="datetime-text">{{ formatDate(alarm.created_at) }}</span>
@@ -386,6 +384,9 @@ export default {
 <style scoped>
 /* 主容器 */
 .alarm-list-premium {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   background: rgba(10, 15, 35, 0.75);
   backdrop-filter: blur(20px) saturate(180%);
   border-radius: 16px;
@@ -414,8 +415,9 @@ export default {
 .search-filters-premium {
   display: flex;
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .search-wrapper {
@@ -473,10 +475,13 @@ export default {
 
 /* 表格 */
 .table-container {
-  margin-bottom: 24px;
+  margin-bottom: 0;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(239, 68, 68, 0.1);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .alarm-table {
@@ -642,7 +647,8 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 0;
+  padding: 16px 0 0 0;
+  flex-shrink: 0;
 }
 
 .pagination-info {

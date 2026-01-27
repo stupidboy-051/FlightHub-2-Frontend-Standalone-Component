@@ -41,11 +41,10 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.exceptions import SuspiciousFileOperation
-import csv
-from django.http import HttpResponse, FileResponse, Http404
+from django.http import FileResponse, Http404
 from django.utils._os import safe_join
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
@@ -322,7 +321,7 @@ def create_alarm_from_detection(task, img, result_data):
                 if created:
                     print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
                 else:
-                    print(f"ℹ️ [Alarm] 告警已存在 (ID: {alarm.id})，跳过创建。图片ID: {img.id}")
+                    print(f"ℹ️ [Alarm] 告警已存在，跳过创建。图片ID: {img.id}")
                 
                 # 成功则退出循环
                 break
@@ -482,25 +481,9 @@ def auto_trigger_detect1(task):
     safe_save(task, update_fields=['detect_status', 'finished_at'])
     print(f"🏁 [Detect] 任务 {task.id} 结束.")
 
-def process_single_image(img, task, detect_url, algo_type, submit_time=None):
+def process_single_image(img, task, detect_url, algo_type):
     """处理单张图片的逻辑（供并发调用）"""
     import time
-    
-    # 🔥 [Double Check] 防止队列积压导致的重复处理
-    # 如果图片已经被其他线程处理完了(status='done')，就直接跳过
-    try:
-        img.refresh_from_db()
-        if img.detect_status == 'done':
-            print(f"⏩ [Skip] 图片 {img.id} 已标记为完成，跳过重复检测")
-            return
-    except Exception:
-        # 如果查询数据库失败（例如被删了），暂不处理，继续后续逻辑尝试
-        pass
-    
-    # 🔥 计算排队时间 (如果提供了提交时间)
-    wait_cost = 0
-    if submit_time:
-        wait_cost = time.time() - submit_time
     
     # 1. 构造极简请求 (符合之前确认的3字段协议)
     payload = {
@@ -522,13 +505,11 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
     try:
         # 🔥 修复 5：增加超时时间到 600 秒（10分钟），适应 GLM-4V 模型处理速度
         # GLM-4V 等大模型处理图片通常需要 1-2 分钟，极端情况可能更长
-        req_start = time.time()
         resp = requests.post(detect_url, json=payload, timeout=600)
-        http_cost = time.time() - req_start
 
         # 🔥 性能监控：记录耗时
         elapsed_time = time.time() - detect_start_time
-        print(f"⏱️ [Detect] 图片 {img.id} 流程耗时: {elapsed_time:.2f}s (排队等待: {wait_cost:.2f}s, HTTP请求: {http_cost:.2f}s)")
+        print(f"⏱️ [Detect] 图片 {img.id} 检测耗时: {elapsed_time:.2f} 秒")
 
         # 🔥 性能警告：如果耗时过长，记录日志
         if elapsed_time > 120:
@@ -538,16 +519,6 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
             # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
             # 因为算法返回的是扁平结构
             data = resp.json()
-
-            # 🔥 增强统计：尝试获取算法服务端耗时
-            server_cost = data.get("cost_time") or data.get("inference_time") or data.get("process_time") or data.get("time_cost")
-            if server_cost:
-                try:
-                    s_cost = float(server_cost)
-                    n_cost = http_cost - s_cost
-                    print(f"🔍 [Perf] 图片 {img.id} 耗时拆解 >> 算法内部: {s_cost:.2f}s | 网络传输/排队: {n_cost:.2f}s")
-                except:
-                    pass
 
             img.result = data
             img.detect_status = "done"
@@ -622,13 +593,9 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
 # 全局导入
 from concurrent.futures import ThreadPoolExecutor
 
-# 🔥 全局单例线程池：所有任务共享这 1 个 worker
+# 🔥 全局单例线程池：所有任务共享这 4 个 worker
 # 这样可以控制并发总量，且不会因为创建销毁线程池浪费资源
-# ⭐ 修正：将并发数从 4 改为 1。
-# 原因：后台算法使用 GLM-4V 等大模型，通常不支持高并发（显存限制）。
-# 如果并发发送，会导致请求在算法服务端排队，从而导致 HTTP 响应时间虚高（包含排队时间），甚至触发超时。
-# 改为串行处理后，日志记录的耗时将更接近真实的算法推理耗时。
-GLOBAL_DETECT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="GlobalDetect")
+GLOBAL_DETECT_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="GlobalDetect")
 
 def auto_trigger_detect(task):
     """
@@ -647,29 +614,23 @@ def auto_trigger_detect(task):
         return
 
     try:
-        # 🔥 第一步：先锁定并获取 ID，而不是直接 Update
-        # 这一步至关重要，因为一旦 Update 之后，就再也查不到 pending 的图了！
-        pending_qs = task.images.filter(detect_status="pending").order_by("id")
+        # 🔥 查询所有 pending 状态的图片
+        images = task.images.filter(detect_status="pending").order_by("id")
         
         # 如果没有图片，直接退出
-        if not pending_qs.exists():
-            return
-            
-        # 拿到 ID 列表（内存暂存）
-        target_ids = list(pending_qs.values_list('id', flat=True))
-        if not target_ids:
+        if not images.exists():
             return
 
-        # 🔥 第二步：原子更新
-        # 只更新刚才查到的那些 ID，防止并发问题
-        updated_count = task.images.filter(id__in=target_ids).update(detect_status="processing")
+        # 🔥 原子操作：立即将这些图片标记为 processing
+        # 这样 Poller 下一轮扫描时就不会再扫到它们了
+        updated_count = images.update(detect_status="processing")
         
         if updated_count > 0:
             print(f"🚀 [Async] 任务 {task.id} 将 {updated_count} 张图片提交至后台队列...")
             
-            # 🔥 第三步：根据 ID 列表获取对象并分发
-            # 这里的 processing_images 绝对不会包含以前的积压任务，只包含本次 update 成功的
-            processing_images = task.images.filter(id__in=target_ids)
+            # 重新获取对象（为了拿到更新后的状态，虽非必须但更稳妥）
+            # 注意：这里不能复用上面的 images queryset，因为 update 后缓存可能失效
+            processing_images = task.images.filter(detect_status="processing")
             
             # 🔥 仅首次更新任务开始时间
             if not task.started_at:
@@ -680,11 +641,6 @@ def auto_trigger_detect(task):
             algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
 
             # 🔥 核心修改：异步提交任务，不等待 (No Wait)
-            # 💡 优化：由于我们改为了单线程执行 (max_workers=1)，
-            # 如果一次性提交太多任务，后面的任务会排队很久，导致“排队时间”很长。
-            # 但这对系统稳定性有好处，避免了并发请求压垮算法服务。
-            # 只要 Poller 是单线程触发的，这里其实就是顺序入队。
-            current_batch_submit_time = time.time()
             for img in processing_images:
                 # submit 是非阻塞的，瞬间完成
                 GLOBAL_DETECT_EXECUTOR.submit(
@@ -692,8 +648,7 @@ def auto_trigger_detect(task):
                     img, 
                     task, 
                     detect_url, 
-                    algo_type,
-                    current_batch_submit_time  # 所有图片共用同一个批次提交时间
+                    algo_type
                 )
             
             print(f"✅ [Async] 任务 {task.id} 分发完成，后台正在处理中...")
@@ -1311,23 +1266,12 @@ def minio_poller_worker1231():
                         # 🔥 新增：检查父任务，如果所有子任务都完成了，同步父任务状态
                         if task.parent_task:
                             parent = task.parent_task
-                            # 重新从数据库获取最新的父任务，避免缓存
-                            parent.refresh_from_db()
-                            # 检查所有子任务是否都已完成
                             all_sub_done = not parent.sub_tasks.exclude(detect_status='done').exists()
                             if all_sub_done and parent.detect_status != 'done':
                                 parent.detect_status = 'done'
                                 parent.finished_at = django_timezone.now()
                                 safe_save(parent, update_fields=['detect_status', 'finished_at'])
                                 print(f"🎉 [Poller] 父任务 {parent.external_task_id} 所有子任务完成，标记为完成")
-                                
-                        # 🔥 新增：如果是未分类/手动任务（手动检测模式创建的任务），且子任务完成了，自动标记子任务为 done
-                        # 这种情况通常是 dji_task_uuid 就是 external_task_id，或者是 start_manual_task 创建的
-                        if not task.detect_category and task.images.count() > 0:
-                             print(f"✅ [Manual Task] 手动任务 {task.external_task_id} 检测完成")
-                             # 这里的逻辑已经在上面 task.detect_status = 'done' 处理了，
-                             # 但如果是手动任务，我们可能希望更激进地确保它结束，避免长时间 scanning
-                             pass
                     else:
                         print(f"⏳ [Poller] 任务 {task.external_task_id} 还有 {processing_cnt} 张图片正在检测中...")
 
@@ -1494,6 +1438,24 @@ def minio_poller_worker2():
                     
                     else:
                         # 原有匹配逻辑
+                        # 🔥 自动修正逻辑：如果指纹类型是 unknown，但航线名包含关键字，则自动更新分类
+                        correct_category = None
+                        if fingerprint.detect_category and fingerprint.detect_category.code == 'unknown':
+                            wayline_name = fingerprint.wayline.name
+                            if "轨道" in wayline_name or "rail" in wayline_name.lower():
+                                correct_category = AlarmCategory.objects.filter(code='rail').first()
+                            elif "桥梁" in wayline_name or "bridge" in wayline_name.lower():
+                                correct_category = AlarmCategory.objects.filter(code='bridge').first()
+                            elif "接触网" in wayline_name or "contact" in wayline_name.lower():
+                                correct_category = AlarmCategory.objects.filter(code='contactline').first()
+                            elif "保护区" in wayline_name or "protected" in wayline_name.lower():
+                                correct_category = AlarmCategory.objects.filter(code='protected_area').first()
+                            
+                            if correct_category:
+                                print(f"🔧 [AutoFix] 自动修正指纹分类: {fingerprint.id} | {fingerprint.detect_category.name} -> {correct_category.name}")
+                                fingerprint.detect_category = correct_category
+                                fingerprint.save()
+                        
                         cat_name = fingerprint.detect_category.name if fingerprint.detect_category else "无类型"
                         print(f"✅ [Match] 命中航线: {fingerprint.wayline.name} -> 类型: {cat_name}")
 
@@ -1598,15 +1560,6 @@ def minio_poller_worker2():
                         # 3. 自动触发检测 (对新图片)
                         #    注意：auto_trigger_detect 内部会找 pending 的图片进行检测
                         threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
-                    else:
-                        # 🔥 修复：即使没有新图片，也要检查是否有挂起的任务需要处理
-                        # 避免因为 sync_images_core 返回 0 而导致之前的 pending 图片卡死
-                        # (例如服务重启、或之前的检测请求丢失)
-                        pending_count = target_task.images.filter(detect_status="pending").count()
-                        if pending_count > 0:
-                             # 为了避免日志刷屏，可以只在真的触发时打印
-                             # print(f"🔄 [Retry] 任务 {target_task.external_task_id} 发现 {pending_count} 张挂起图片，强制触发检测...")
-                             threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
 
             # =========================================================
             # 第四步：全局超时判断 (处理无人机充电/结束的情况)
@@ -1722,19 +1675,6 @@ def minio_poller_worker1():
                         inspect_task=task,
                         detect_status__in=['pending', 'processing']
                     ).count()
-                    
-                    if unfinished_cnt > 0:
-                        # 🔥 修复：如果还有 pending 的图，强制触发一下检测（防卡死）
-                        pending_only = InspectImage.objects.filter(
-                            inspect_task=task,
-                            detect_status='pending'
-                        ).count()
-                        if pending_only > 0:
-                            # 只有当没有新图的时候，才去管 pending 的
-                            # 如果刚刚已经触发了 (new_images_count > 0)，这里就不要再触发了
-                            if new_images_count == 0:
-                                # print(f"🔄 [Retry] 任务 {task.external_task_id} 发现 {pending_only} 张挂起图片，强制触发检测...")
-                                threading.Thread(target=auto_trigger_detect, args=(task,)).start()
 
                     if unfinished_cnt == 0:
                         print(f"✅ [Poller] 任务 {task.external_task_id} 已无新图且处理完毕，自动结束扫描。")
@@ -2312,88 +2252,6 @@ class MediaLibraryViewSet(viewsets.ViewSet):
         response = FileResponse(open(full_path, 'rb'))
         mime_type, _ = mimetypes.guess_type(full_path)
         if mime_type: response["Content-Type"] = mime_type
-        return response
-
-
-class InspectImageViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    巡检图片视图集
-    """
-    queryset = InspectImage.objects.all().order_by('-created_at')
-    serializer_class = InspectImageSerializer
-
-    @action(detail=False, methods=['get'])
-    def export(self, request):
-        """
-        导出巡检图片列表为 CSV，支持按日期筛选
-        Query Params: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
-        """
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        
-        queryset = self.get_queryset()
-        
-        if start_date:
-            try:
-                start = datetime.strptime(start_date, '%Y-%m-%d')
-                queryset = queryset.filter(created_at__date__gte=start.date())
-            except ValueError:
-                pass
-                
-        if end_date:
-            try:
-                end = datetime.strptime(end_date, '%Y-%m-%d')
-                queryset = queryset.filter(created_at__date__lte=end.date())
-            except ValueError:
-                pass
-        
-        response = HttpResponse(content_type='text/csv')
-        filename = f"inspect_images_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response.write('\ufeff'.encode('utf8'))  # BOM for Excel compatibility
-
-        writer = csv.writer(response)
-        # 表头: 图片路径（object_key) 检测类型 以及相应体中的visible_items fault_items
-        writer.writerow(['Image Path', 'Detection Type', 'Visible Items', 'Fault Items', 'Created At'])
-
-        for img in queryset:
-            result = img.result or {}
-            
-            # Extract fields
-            object_key = img.object_key
-            
-            # Detection Type / Status
-            # 1 = Defect Found; 0 = No Defect Found
-            status_code = result.get('detection_status')
-            if status_code == 1:
-                detect_status = "Defect Found"
-            elif status_code == 0:
-                detect_status = "No Defect Found"
-            else:
-                detect_status = str(status_code) if status_code is not None else ""
-
-            # Visible Items
-            visible_items = result.get('visible_items')
-            if isinstance(visible_items, list):
-                visible_str = ", ".join(str(x) for x in visible_items)
-            else:
-                visible_str = str(visible_items) if visible_items is not None else ""
-
-            # Fault Items
-            fault_items = result.get('fault_items')
-            if isinstance(fault_items, list):
-                fault_str = ", ".join(str(x) for x in fault_items)
-            else:
-                fault_str = str(fault_items) if fault_items is not None else ""
-
-            writer.writerow([
-                object_key,
-                detect_status,
-                visible_str,
-                fault_str,
-                img.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            ])
-            
         return response
 
 
@@ -3128,6 +2986,128 @@ def scan_candidate_folders(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"code": 500, "msg": str(e)})
+
+
+@csrf_exempt
+def start_manual_task(request):
+    """
+    手动/手机端启动检测任务
+    POST /start_manual_task
+    Body: { "source": "mobile", "folder_path": "...", "detect_type": "...", "task_name": "..." }
+    """
+    if request.method != 'POST':
+        return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
+    
+    try:
+        data = json.loads(request.body)
+        source = data.get('source', 'unknown')
+        folder_path = data.get('folder_path')
+        detect_type = data.get('detect_type', 'unknown')
+        task_name = data.get('task_name', '').strip()
+        
+        print(f"📱 [Manual Task] 收到启动请求, source={source}, data={data}")
+        
+        if not folder_path:
+            return JsonResponse({"code": 400, "msg": "必须提供 folder_path"})
+            
+        # 1. 尝试从路径中解析 task_uuid (司空任务ID)
+        # 假设路径形如: .../media/{task_uuid}/... 或 .../{task_uuid}/...
+        potential_uuid = None
+        parts = folder_path.strip('/').split('/')
+        
+        # 简单启发式：查找 UUID 格式或特定长度的字符串
+        for part in reversed(parts):
+            if len(part) > 20 and '-' in part: # 简单的 UUID 判断
+                potential_uuid = part
+                break
+            # 或者尝试匹配特定的任务名格式（如果任务名就是 UUID）
+        
+        if not potential_uuid:
+            # 如果没找到明显 UUID，就用最后一个文件夹名作为标识
+            potential_uuid = parts[-1] if parts else f"manual_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        # 2. 查找是否已存在对应的司空任务
+        # 优先按 dji_task_uuid 查找，其次按 external_task_id (任务名) 查找
+        existing_task = InspectTask.objects.filter(
+            Q(dji_task_uuid=potential_uuid) | 
+            Q(external_task_id=task_name if task_name else potential_uuid) |
+            Q(prefix_list__contains=folder_path) # 最准确：按路径查找
+        ).first()
+
+        if existing_task:
+            print(f"🔄 [Manual Task] 发现现有任务 {existing_task.id} ({existing_task.external_task_id})，复用之")
+            
+            # 更新状态为 scanning 以触发检测
+            existing_task.detect_status = "scanning"
+            
+            # 如果提供了新的任务名且原任务没名字，则更新
+            if task_name and (not existing_task.dji_task_name or existing_task.dji_task_name == existing_task.dji_task_uuid):
+                existing_task.dji_task_name = task_name
+                existing_task.external_task_id = task_name
+                
+            # 更新检测类型
+            if detect_type and detect_type != 'unknown':
+                category_obj = AlarmCategory.objects.filter(code=detect_type).first()
+                if category_obj:
+                    existing_task.detect_category = category_obj
+            
+            # 确保路径在列表中
+            if folder_path not in existing_task.prefix_list:
+                existing_task.prefix_list.append(folder_path)
+                
+            existing_task.save()
+            task = existing_task
+            msg = f"已触发检测: {existing_task.external_task_id}"
+            
+        else:
+            # 3. 创建新任务 (确实是手动任务)
+            print(f"🆕 [Manual Task] 未找到现有任务，创建新任务")
+            
+            # 解析任务名称
+            if not task_name:
+                task_name = parts[-1] if parts else f"manual_task_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                
+            # 匹配检测类型
+            category_obj = None
+            if detect_type and detect_type != 'unknown':
+                category_obj = AlarmCategory.objects.filter(code=detect_type).first()
+            
+            bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+            
+            # 构造一个唯一的 dji_task_uuid
+            # 如果 potential_uuid 看起来像 UUID，就用它；否则加前缀避免冲突
+            final_uuid = potential_uuid if len(potential_uuid) > 30 else f"manual_{potential_uuid}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            
+            task = InspectTask.objects.create(
+                dji_task_uuid=final_uuid,
+                external_task_id=task_name,
+                dji_task_name=task_name,
+                dji_status="manual_created",
+                bucket=bucket_name,
+                prefix_list=[folder_path],
+                detect_category=category_obj,
+                detect_status="scanning",
+                started_at=django_timezone.now()
+            )
+            msg = f"检测任务已启动: {task_name}"
+
+        # 4. 异步触发图片同步和检测
+        # 注意：这里我们手动调用 sync_images_core 来立即响应
+        # 但为了不阻塞，建议还是依赖后台轮询，或者用线程
+        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+        
+        return JsonResponse({
+            "code": 0, 
+            "msg": msg,
+            "task_id": task.id
+        })
+    except Exception as e:
+        print(f"❌ [Manual Task Error]: {e}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"code": 500, "msg": str(e)})
+
+
 import re
 from datetime import datetime
 
@@ -3164,128 +3144,6 @@ def parse_folder_name(folder_name):
 
     # 3. 实在解析不出来，就默认“今天”
     return datetime.now().strftime("%Y-%m-%d"), folder_name
-
-
-@csrf_exempt
-def start_manual_task(request):
-    """
-    [API] 手动启动检测任务 (不依赖指纹)
-    输入:
-    {
-        "folder_path": "fh_sync/manual_test/bridge_01/",
-        "category_code": "bridge",  # 可选，如果不传则尝试从路径解析
-        "task_name": "手动测试01"    # 可选
-    }
-    """
-    if request.method != 'POST':
-        return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
-
-    try:
-        body = json.loads(request.body)
-        folder_path = body.get("folder_path")
-        category_code = body.get("category_code")
-        task_name = body.get("task_name")
-
-        if not folder_path:
-            return JsonResponse({"code": 400, "msg": "folder_path is required"})
-
-        # 规范化路径
-        if not folder_path.endswith('/'):
-            folder_path += '/'
-
-        s3 = get_minio_client()
-        bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
-
-        # 1. 检查路径是否存在 (列举该前缀下的对象)
-        resp = s3.list_objects_v2(Bucket=bucket_name, Prefix=folder_path, MaxKeys=1)
-        if 'Contents' not in resp:
-            return JsonResponse({"code": 404, "msg": f"Folder not found in MinIO: {folder_path}"})
-
-        # 2. 如果未提供分类，尝试解析
-        if not category_code:
-            # 使用 parse_folder_name 解析最后一级目录名
-            folder_name = folder_path.strip('/').split('/')[-1]
-            date_str, type_str = parse_folder_name(folder_name)
-            
-            # 简单的关键字映射
-            type_lower = type_str.lower()
-            if "bridge" in type_lower or "桥" in type_lower:
-                category_code = "bridge"
-            elif "rail" in type_lower or "轨道" in type_lower:
-                category_code = "rail"
-            elif "contact" in type_lower or "绝缘" in type_lower:
-                category_code = "contactline"
-            elif "protect" in type_lower or "保护" in type_lower:
-                category_code = "protected_area"
-            else:
-                category_code = "unknown"
-
-        # 3. 获取或创建分类
-        category_obj = None
-        if category_code:
-            category_obj = AlarmCategory.objects.filter(code=category_code).first()
-            if not category_obj:
-                category_obj = AlarmCategory.objects.create(
-                    name=f"{category_code}检测(手动)",
-                    code=category_code
-                )
-
-        # 4. 创建任务
-        # 使用 folder_path 作为唯一标识的一部分，或者生成一个 unique ID
-        task_uuid = f"manual_{uuid.uuid4().hex[:8]}"
-        
-        if not task_name:
-            folder_name = folder_path.strip('/').split('/')[-1]
-            task_name = f"手动检测_{folder_name}_{datetime.now().strftime('%H%M%S')}"
-
-        # 创建父任务 (为了保持结构一致，虽然手动任务可能不需要复杂的父子结构，但为了兼容列表显示)
-        today_str = datetime.now().strftime('%Y%m%d')
-        parent_task_id = f"{today_str}手动任务"
-        parent_task, _ = InspectTask.objects.get_or_create(
-            external_task_id=parent_task_id,
-            defaults={
-                "detect_status": "pending",
-                "bucket": bucket_name,
-                "prefix_list": []
-            }
-        )
-
-        task = InspectTask.objects.create(
-            parent_task=parent_task,
-            external_task_id=task_name,
-            dji_task_name=task_name,
-            dji_task_uuid=task_uuid, # 伪造一个 UUID
-            bucket=bucket_name,
-            prefix_list=[folder_path],
-            detect_category=category_obj,
-            detect_status="scanning",
-            started_at=django_timezone.now(),
-            wayline=category_obj.wayline if category_obj else None
-        )
-
-        print(f"🚀 [Manual] 创建手动任务: {task_name} | 路径: {folder_path} | 分类: {category_code}")
-
-        # 5. 同步图片
-        new_images_count = sync_images_core(task)
-        print(f"📸 [Manual] 同步图片: {new_images_count} 张")
-
-        # 6. 触发检测
-        if new_images_count > 0:
-             threading.Thread(target=auto_trigger_detect, args=(task,)).start()
-
-        return JsonResponse({
-            "code": 200,
-            "msg": "Manual task started",
-            "task_id": task.id,
-            "image_count": new_images_count,
-            "category": category_obj.name if category_obj else "Unknown"
-        })
-
-    except Exception as e:
-        print(f"❌ [Manual Error] {e}")
-        import traceback
-        traceback.print_exc()
-        return JsonResponse({"code": 500, "msg": str(e)})
 
 
 @csrf_exempt
@@ -4294,56 +4152,145 @@ class DockStatusViewSet(viewsets.ModelViewSet):
 
 class SuspiciousImageViewSet(viewsets.ModelViewSet):
     """
-    存疑/误报图片管理接口
+    存疑/误报图片管理
     """
     queryset = SuspiciousImage.objects.all()
     serializer_class = SuspiciousImageSerializer
-    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['status', 'alarm', 'inspect_image']
-    ordering_fields = ['created_at', 'status']
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """
-        统计各状态的存疑图片数量
+        获取存疑图片统计数据
+        GET /api/v1/suspicious-images/stats/
         """
-        total = SuspiciousImage.objects.count()
-        pending = SuspiciousImage.objects.filter(status='PENDING').count()
-        confirmed = SuspiciousImage.objects.filter(status='CONFIRMED').count()
-        ignored = SuspiciousImage.objects.filter(status='IGNORED').count()
-        
+        total = self.get_queryset().count()
+        pending = self.get_queryset().filter(status='PENDING').count()
+        confirmed = self.get_queryset().filter(status='CONFIRMED').count()
+        ignored = self.get_queryset().filter(status='IGNORED').count()
         return Response({
-            "total": total,
-            "pending": pending,
-            "confirmed": confirmed,
-            "ignored": ignored
+            'total': total,
+            'pending': pending,
+            'confirmed': confirmed,
+            'ignored': ignored
         })
 
     @action(detail=False, methods=['get'])
     def export(self, request):
         """
-        导出存疑图片列表为 CSV
+        导出存疑记录为CSV
+        GET /api/v1/suspicious-images/export/
         """
+        import csv
+        from django.http import HttpResponse
+        
         response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="suspicious_images_{datetime.now().strftime("%Y%m%d%H%M%S")}.csv"'
-        response.write('\ufeff'.encode('utf8'))  # BOM (Optional, for Excel compatibility)
-
+        response['Content-Disposition'] = 'attachment; filename="suspicious_images.csv"'
+        
         writer = csv.writer(response)
-        writer.writerow(['ID', 'Image Path', 'Status', 'Note', 'Created At', 'Alarm ID', 'Inspect Image ID'])
-
-        images = SuspiciousImage.objects.all().order_by('-created_at')
-        for img in images:
+        writer.writerow(['ID', 'Image Path', 'Status', 'Note', 'Created At'])
+        
+        for item in self.get_queryset():
             writer.writerow([
-                img.id,
-                img.image_path,
-                img.get_status_display(),
-                img.note,
-                img.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                img.alarm_id if img.alarm_id else '',
-                img.inspect_image_id if img.inspect_image_id else ''
+                item.id,
+                item.image_path,
+                item.get_status_display(),
+                item.note,
+                item.created_at.strftime('%Y-%m-%d %H:%M:%S')
             ])
+            
+        return response
 
+
+class InspectImageViewSet(viewsets.ModelViewSet):
+    """
+    巡检图片管理
+    """
+    queryset = InspectImage.objects.all()
+    serializer_class = InspectImageSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['inspect_task', 'detect_status', 'wayline']
+    ordering_fields = ['created_at', 'id']
+    ordering = ['id']
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        """
+        导出巡检报表
+        GET /api/v1/inspect-images/export/?start_date=2023-01-01&end_date=2023-01-31
+        """
+        import csv
+        from django.http import HttpResponse
+        
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        
+        queryset = self.get_queryset()
+        
+        if start_date:
+            queryset = queryset.filter(created_at__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(created_at__date__lte=end_date)
+            
+        response = HttpResponse(content_type='text/csv')
+        filename = f"inspection_report_{start_date or 'all'}_{end_date or 'all'}.csv"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        writer = csv.writer(response)
+        # Add BOM for Excel compatibility with UTF-8
+        response.write(u'\ufeff'.encode('utf8'))
+        
+        writer.writerow(['ID', 'Task', 'Wayline', 'Status', 'Image Path', 'Detect Type', 'Fault Items', 'Visible Items', 'Created At'])
+        
+        for item in queryset:
+            task_name = item.inspect_task.external_task_id if item.inspect_task else '--'
+            wayline_name = item.wayline.name if item.wayline else '--'
+            status = item.get_detect_status_display()
+            created_at = item.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            object_key = item.object_key
+            
+            # 解析 result 字段
+            detect_type = ''
+            fault_items = ''
+            visible_items = ''
+            
+            if item.result:
+                try:
+                    result_data = item.result if isinstance(item.result, dict) else json.loads(str(item.result))
+                    detect_type = result_data.get('detect_type', '')
+                    
+                    # 处理列表字段，转为逗号分隔字符串
+                    faults = result_data.get('fault_items', [])
+                    if isinstance(faults, list):
+                        fault_items = ', '.join([str(f) for f in faults])
+                    else:
+                        fault_items = str(faults)
+                        
+                    visibles = result_data.get('visible_items', [])
+                    if isinstance(visibles, list):
+                        visible_items = ', '.join([str(v) for v in visibles])
+                    else:
+                        visible_items = str(visibles)
+                except Exception as e:
+                    print(f"Error parsing result for image {item.id}: {e}")
+                    # 只有解析失败时才保留原始字符串，或者留空
+                    pass
+            
+            writer.writerow([
+                item.id,
+                task_name,
+                wayline_name,
+                status,
+                object_key,
+                detect_type,
+                fault_items,
+                visible_items,
+                created_at
+            ])
+            
         return response
 
 

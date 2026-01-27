@@ -580,6 +580,10 @@ export default {
 .inspect-task-list-premium {
   padding: 28px 36px;
   animation: cardSlideIn 0.5s ease-out;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 @keyframes cardSlideIn {
@@ -652,7 +656,10 @@ export default {
 /* 表格容器 */
 .table-container {
   overflow-x: auto;
+  overflow-y: auto;
   margin-bottom: 20px;
+  flex: 1;
+  min-height: 0;
 }
 
 /* 加载状态 */

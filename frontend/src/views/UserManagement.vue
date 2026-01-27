@@ -15,16 +15,16 @@
           </div>
         </div>
         <div class="header-actions" style="display: flex; gap: 12px;">
-          <button @click="showExportInspectDialog" class="add-user-btn-premium" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);">
-            <span class="btn-icon" style="font-size: 16px;">📊</span>
-            导出巡检报表
-          </button>
           <button @click="exportSuspiciousImages" class="add-user-btn-premium" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);">
             <span class="btn-icon" style="font-size: 16px;">⬇</span>
             导出存疑记录
           </button>
-          <button @click="showManualTaskDialog" class="add-user-btn-premium" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);">
-            <span class="btn-icon" style="font-size: 16px;">🚀</span>
+          <button @click="exportInspectionReport" class="add-user-btn-premium" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);">
+            <span class="btn-icon" style="font-size: 16px;">📊</span>
+            导出检测报表
+          </button>
+          <button @click="handleManualDetect" class="add-user-btn-premium" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);">
+            <span class="btn-icon" style="font-size: 16px;">�️</span>
             手动检测
           </button>
           <button @click="showAddUserDialog" class="add-user-btn-premium">
@@ -146,85 +146,6 @@
       </div>
     </div>
 
-    <!-- 导出巡检报表对话框 -->
-    <div v-if="exportInspectDialogVisible" class="modal-overlay" @click.self="exportInspectDialogVisible = false">
-      <div class="modal-premium">
-        <div class="modal-header">
-          <h2 class="modal-title">导出巡检报表</h2>
-          <button @click="exportInspectDialogVisible = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label class="form-label">开始日期</label>
-            <input 
-              v-model="exportDateRange.start"
-              type="date"
-              class="form-input"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">结束日期</label>
-            <input 
-              v-model="exportDateRange.end"
-              type="date"
-              class="form-input"
-            />
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="exportInspectDialogVisible = false" class="modal-btn secondary-btn">取消</button>
-          <button @click="exportInspectImages" :disabled="isExporting" class="modal-btn primary-btn">
-            {{ isExporting ? '导出中...' : '确认导出' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 手动检测对话框 -->
-    <div v-if="manualTaskDialogVisible" class="modal-overlay" @click.self="manualTaskDialogVisible = false">
-      <div class="modal-premium">
-        <div class="modal-header">
-          <h2 class="modal-title">手动启动检测任务</h2>
-          <button @click="manualTaskDialogVisible = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label class="form-label">MinIO 文件夹路径 (必填)</label>
-            <input 
-              v-model="manualTaskForm.folder_path"
-              placeholder="例如: fh_sync/custom_test/20250121_bridge/"
-              class="form-input"
-            />
-            <p style="color: #64748b; font-size: 12px; margin-top: 4px;">请输入 MinIO 中存在的完整文件夹路径，需以 / 结尾</p>
-          </div>
-          <div class="form-group">
-            <label class="form-label">检测类型 (可选)</label>
-            <select v-model="manualTaskForm.category_code" class="form-select">
-              <option value="">自动识别 (从文件夹名解析)</option>
-              <option value="bridge">桥梁检测</option>
-              <option value="rail">轨道检测</option>
-              <option value="contactline">接触网检测</option>
-              <option value="protected_area">保护区检测</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">任务名称 (可选)</label>
-            <input 
-              v-model="manualTaskForm.task_name"
-              placeholder="默认自动生成"
-              class="form-input"
-            />
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="manualTaskDialogVisible = false" class="modal-btn secondary-btn">取消</button>
-          <button @click="submitManualTask" :disabled="isStartingManualTask" class="modal-btn primary-btn">
-            {{ isStartingManualTask ? '启动中...' : '确认启动' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- 添加/编辑用户对话框 -->
     <div v-if="dialogVisible" class="modal-overlay" @click.self="closeDialog">
       <div class="modal-premium">
@@ -276,6 +197,85 @@
       </div>
     </div>
 
+    <!-- 手动检测弹窗 -->
+    <div v-if="manualDetectVisible" class="modal-overlay" @click.self="manualDetectVisible = false">
+      <div class="modal-premium">
+        <div class="modal-header">
+          <h2 class="modal-title">手动检测</h2>
+          <button @click="manualDetectVisible = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">MinIO 文件夹路径</label>
+            <input 
+              v-model="manualDetectForm.folderPath"
+              placeholder="例如: 20231001_rail_test/media/flight_uuid/"
+              class="form-input"
+            />
+            <p class="form-hint">请输入 MinIO 中包含图片的完整文件夹路径</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">检测类型 (可选)</label>
+            <select v-model="manualDetectForm.detectType" class="form-select">
+              <option value="unknown">自动识别 (从文件夹名解析)</option>
+              <option value="rail">轨道检测 (Rail)</option>
+              <option value="contactline">接触网检测 (Contactline)</option>
+              <option value="bridge">桥梁检测 (Bridge)</option>
+              <option value="protected_area">保护区检测 (Protected Area)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">任务名称 (可选)</label>
+            <input 
+              v-model="manualDetectForm.taskName"
+              placeholder="默认自动生成"
+              class="form-input"
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="manualDetectVisible = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="confirmManualDetect" class="modal-btn primary-btn" :disabled="!manualDetectForm.folderPath">
+            确认启动
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导出报表弹窗 -->
+    <div v-if="exportReportVisible" class="modal-overlay" @click.self="exportReportVisible = false">
+      <div class="modal-premium">
+        <div class="modal-header">
+          <h2 class="modal-title">导出检测报表</h2>
+          <button @click="exportReportVisible = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">开始日期</label>
+            <input 
+              v-model="exportForm.startDate"
+              type="date"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">结束日期</label>
+            <input 
+              v-model="exportForm.endDate"
+              type="date"
+              class="form-input"
+            />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="exportReportVisible = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="confirmExportReport" class="modal-btn primary-btn">
+            导出 Excel
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 删除确认对话框 -->
     <div v-if="deleteDialogVisible" class="modal-overlay" @click.self="deleteDialogVisible = false">
       <div class="modal-premium delete-modal">
@@ -306,8 +306,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useStore } from 'vuex'
 import { ElMessage } from 'element-plus'
 import suspiciousImageApi from '../api/suspiciousImageApi'
-import inspectImageApi from '../api/inspectImageApi'
 import inspectTaskApi from '../api/inspectTaskApi'
+import inspectImageApi from '../api/inspectImageApi'
 
 export default {
   name: 'UserManagement',
@@ -329,23 +329,16 @@ export default {
     })
     const searchQuery = ref('')
     const dialogVisible = ref(false)
+    const manualDetectVisible = ref(false)
+    const exportReportVisible = ref(false)
     const deleteDialogVisible = ref(false)
-    const exportInspectDialogVisible = ref(false)
-    const manualTaskDialogVisible = ref(false) // 手动检测弹窗
     const editingUserId = ref(null)
     const selectedUserName = ref('')
     const selectedUserId = ref(null)
     const isSubmitting = ref(false)
     const isDeleting = ref(false)
-    const isExporting = ref(false)
-    const isStartingManualTask = ref(false) // 手动检测提交状态
     const pageSizeLocal = ref(10)
     
-    const exportDateRange = ref({
-      start: '',
-      end: ''
-    })
-
     const formData = ref({
       username: '',
       name: '',
@@ -353,11 +346,15 @@ export default {
       role: 'user'
     })
 
-    // 手动检测表单
-    const manualTaskForm = ref({
-      folder_path: '',
-      category_code: '',
-      task_name: ''
+    const manualDetectForm = ref({
+      folderPath: '',
+      detectType: 'unknown',
+      taskName: ''
+    })
+
+    const exportForm = ref({
+      startDate: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
+      endDate: new Date().toISOString().split('T')[0]
     })
     
     // 计算属性
@@ -559,79 +556,50 @@ export default {
       }
     }
 
-    const showExportInspectDialog = () => {
-      // 默认选中最近一个月
-      const end = new Date()
-      const start = new Date()
-      start.setMonth(start.getMonth() - 1)
-      
-      exportDateRange.value = {
-        start: start.toISOString().split('T')[0],
-        end: end.toISOString().split('T')[0]
-      }
-      exportInspectDialogVisible.value = true
+    const exportInspectionReport = () => {
+      exportReportVisible.value = true
     }
 
-    const exportInspectImages = async () => {
+    const confirmExportReport = async () => {
       try {
-        isExporting.value = true
-        const params = {
-          start_date: exportDateRange.value.start,
-          end_date: exportDateRange.value.end
-        }
-        
-        const response = await inspectImageApi.exportInspectImages(params)
-        
+        const response = await inspectImageApi.exportInspectImages({
+          start_date: exportForm.value.startDate,
+          end_date: exportForm.value.endDate
+        })
         const url = window.URL.createObjectURL(new Blob([response]))
         const link = document.createElement('a')
         link.href = url
         const now = new Date()
         const timestamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
-        link.setAttribute('download', `inspect_images_${timestamp}.csv`)
+        link.setAttribute('download', `inspection_report_${timestamp}.xlsx`)
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
-        
-        exportInspectDialogVisible.value = false
-        ElMessage.success('导出成功')
+        ElMessage.success('报表导出成功')
+        exportReportVisible.value = false
       } catch (error) {
-        console.error('导出失败:', error)
-        ElMessage.error('导出失败')
-      } finally {
-        isExporting.value = false
+        console.error('导出报表失败:', error)
+        ElMessage.error('导出报表失败')
       }
     }
 
-    // 手动检测相关方法
-    const showManualTaskDialog = () => {
-      manualTaskForm.value = {
-        folder_path: '',
-        category_code: '',
-        task_name: ''
-      }
-      manualTaskDialogVisible.value = true
+    const handleManualDetect = () => {
+      manualDetectVisible.value = true
     }
 
-    const submitManualTask = async () => {
-      if (!manualTaskForm.value.folder_path) {
-        ElMessage.error('请输入文件夹路径')
-        return
-      }
-
+    const confirmManualDetect = async () => {
       try {
-        isStartingManualTask.value = true
-        const res = await inspectTaskApi.startManualTask(manualTaskForm.value)
-        if (res.code === 200) {
-          ElMessage.success(`任务启动成功: ${res.task_id} (同步图片: ${res.image_count}张)`)
-          manualTaskDialogVisible.value = false
-        } else {
-          ElMessage.error(res.msg || '启动失败')
-        }
+        await inspectTaskApi.startManualTask({
+          source: 'web_manual',
+          folder_path: manualDetectForm.value.folderPath,
+          detect_type: manualDetectForm.value.detectType,
+          task_name: manualDetectForm.value.taskName
+        })
+        ElMessage.success('手动检测指令已发送')
+        manualDetectVisible.value = false
       } catch (error) {
-        console.error('启动手动任务失败:', error)
-        ElMessage.error('启动失败，请检查路径是否正确')
-      } finally {
-        isStartingManualTask.value = false
+        console.error('手动检测失败:', error)
+        ElMessage.error('发送失败，请检查后端服务')
       }
     }
 
@@ -639,24 +607,22 @@ export default {
       suspiciousStats,
       loadSuspiciousStats,
       exportSuspiciousImages,
-      showExportInspectDialog,
-      exportInspectImages,
-      exportInspectDialogVisible,
-      exportDateRange,
-      isExporting,
-      manualTaskDialogVisible,
-      manualTaskForm,
-      isStartingManualTask,
-      showManualTaskDialog,
-      submitManualTask,
+      exportInspectionReport,
+      confirmExportReport,
+      handleManualDetect,
+      confirmManualDetect,
       searchQuery,
       dialogVisible,
+      manualDetectVisible,
+      exportReportVisible,
       deleteDialogVisible,
       selectedUserName,
       selectedUserId,
       isSubmitting,
       isDeleting,
       formData,
+      manualDetectForm,
+      exportForm,
       allUsers,
       currentPage,
       pageSize,
@@ -683,9 +649,13 @@ export default {
 <style scoped>
 /* 主容器 */
 .user-management-premium {
-  max-width: 1600px;
+  /* max-width: 1600px; */
+  width: 100%;
   margin: 0 auto;
   padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 页面头部 */
@@ -849,9 +819,15 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.2);
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .table-wrapper-premium {
+  flex: 1;
+  overflow-y: auto;
   overflow-x: auto;
 }
 

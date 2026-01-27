@@ -22,7 +22,7 @@
       <div class="loading-spinner"></div>
       <p>正在加载告警统计...</p>
     </div>
-    <div v-else>
+    <div v-else class="content-scroll">
       <div v-if="error" class="error-state">{{ error }}</div>
 
       <div class="top-grid">
@@ -306,7 +306,7 @@ export default {
       donutSeries: [],
       chartSize: {
         width: 1080,
-        height: 320
+        height: 240
       },
       chartPaddingX: 28,
       chartPaddingY: 16,
@@ -814,11 +814,34 @@ export default {
 
 <style scoped>
 .alarm-stats-page {
-  max-width: 1640px;
+  width: 100%;
   margin: 0 auto;
-  padding: 24px 18px 48px;
+  padding: 0;
   color: #e2e8f0;
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.content-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 24px 24px;
+}
+
+.scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 18px 48px;
+  width: 100%;
+}
+
+.inner-content {
+  max-width: 1640px;
+  margin: 0 auto;
 }
 
 .page-header {
@@ -826,7 +849,8 @@ export default {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
+  padding: 24px 24px 0 24px;
 }
 
 .title-block {
@@ -885,7 +909,7 @@ export default {
   display: grid;
   grid-template-columns: 1.25fr 1.1fr 1fr;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .card {
@@ -900,7 +924,7 @@ export default {
 
 .hero-card {
   background: linear-gradient(135deg, rgba(12, 74, 110, 0.85), rgba(30, 64, 175, 0.85));
-  min-height: 220px;
+  min-height: 180px;
 }
 
 .hero-overlay {

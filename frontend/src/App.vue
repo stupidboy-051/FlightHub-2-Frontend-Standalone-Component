@@ -162,6 +162,7 @@ import alarmIcon from '../pho/告警管理_实时告警.svg'
 import alarmStatsIcon from '../pho/告警统计.svg'
 import inspectTaskIcon from '../pho/巡检任务.svg'
 import userManagementIcon from '../pho/人员管理.svg'
+import ScreenAdapter from './utils/screenAdapter'
 
 export default {
   name: "App",
@@ -187,6 +188,16 @@ export default {
   },
   mounted() {
     console.log("App 组件已挂载");
+
+    // 初始化大屏适配
+    this.$nextTick(() => {
+      this.screenAdapter = new ScreenAdapter({
+        width: 1920,
+        height: 1080,
+        target: '#app'
+      })
+      this.screenAdapter.init()
+    })
 
     // 监听路由变化，更新认证状态
     this.$router.afterEach(() => {
@@ -283,11 +294,13 @@ body {
 
 /* 应用容器 */
 .app-container {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%; /* 改为 100% 配合 #app 的固定高度 */
   background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0a0e27 100%);
   background-attachment: fixed;
   position: relative;
   overflow: hidden;
+  display: block;
 }
 
 /* 背景装饰 */
@@ -314,8 +327,11 @@ body {
 
 /* 高级导航栏 */
 .premium-nav-bar {
-  position: sticky;
+  position: absolute; /* 绝对定位固定在顶部 */
   top: 0;
+  left: 0;
+  width: 100%;
+  height: 72px; /* 固定高度 */
   z-index: 1000;
   background: rgba(26, 31, 58, 0.85);
   backdrop-filter: blur(20px) saturate(180%);
@@ -613,9 +629,13 @@ body {
 
 /* 主内容区域 */
 .main-content {
-  position: relative;
+  position: absolute;
+  top: 72px;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 1;
-  min-height: calc(100vh - 72px);
+  overflow: hidden; /* 防止内容溢出，滚动由各页面自己处理 */
   padding: 24px;
 }
 

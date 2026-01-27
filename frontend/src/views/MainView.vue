@@ -911,7 +911,7 @@ initCesiumMap() {
 
 .home-dashboard {
   width: 100%;
-  height: calc(100vh - 110px);
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -923,7 +923,6 @@ initCesiumMap() {
   flex: 1;
   min-height: 0;
   width: 100%;
-  table-layout: fixed;
 }
 
 .side-panel {

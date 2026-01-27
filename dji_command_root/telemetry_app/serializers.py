@@ -402,42 +402,6 @@ class InspectImageSerializer(serializers.ModelSerializer):
         import json
         data = getattr(obj, "result", None)
         if data:
-            # 兼容处理：确保返回正确的JSON字符串
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data)
-                except:
-                    pass
-            
-            # 🔥 补充检测类型字段
-            if isinstance(data, dict):
-                # 尝试从任务获取检测类型
-                if obj.inspect_task:
-                    # 1. 优先使用任务配置的检测类型名称
-                    if obj.inspect_task.detect_category:
-                        data['detect_type'] = obj.inspect_task.detect_category.name
-                    # 2. 其次尝试使用 external_task_id 解析
-                    elif obj.inspect_task.external_task_id:
-                        task_id = obj.inspect_task.external_task_id
-                        if '桥梁' in task_id or 'bridge' in task_id.lower():
-                            data['detect_type'] = '桥梁检测'
-                        elif '接触网' in task_id or 'contact' in task_id.lower():
-                            data['detect_type'] = '接触网检测'
-                        elif '轨道' in task_id or 'rail' in task_id.lower():
-                            data['detect_type'] = '轨道检测'
-                        elif '保护区' in task_id or 'protect' in task_id.lower():
-                            data['detect_type'] = '保护区检测'
-                
-                # 如果还是没有，尝试从result内部字段推断
-                if 'detect_type' not in data and 'detect_type_code' in data:
-                     code_map = {
-                         'rail': '轨道检测',
-                         'contactline': '接触网检测',
-                         'bridge': '桥梁检测',
-                         'protected_area': '保护区检测'
-                     }
-                     data['detect_type'] = code_map.get(data['detect_type_code'], data['detect_type_code'])
-
             return json.dumps(data, ensure_ascii=False)
         return None
 

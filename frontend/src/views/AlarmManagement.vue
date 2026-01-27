@@ -46,12 +46,16 @@ export default {
   max-width: 1600px;
   margin: 0 auto;
   padding: 0;
-  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* 页面头部 */
 .page-header-premium {
   margin-bottom: 32px;
+  flex-shrink: 0; /* 防止头部被压缩 */
 }
 
 .header-content {
@@ -114,11 +118,15 @@ export default {
 
 /* 告警内容区域 */
 .alarm-content {
+  flex: 1;
+  min-height: 0; /* 关键：允许 flex 子项缩小 */
   background: rgba(26, 31, 58, 0.4);
   backdrop-filter: blur(10px);
   border-radius: 16px;
   border: 1px solid rgba(239, 68, 68, 0.2);
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
 }
 </style>

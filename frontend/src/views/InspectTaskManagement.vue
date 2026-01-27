@@ -43,9 +43,12 @@ export default {
 /* 主容器 */
 .inspect-task-management-premium {
   max-width: 1600px;
+  width: 100%;
   margin: 0 auto;
   padding: 0;
-  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 页面头部 */
@@ -119,5 +122,9 @@ export default {
   border: 1px solid rgba(59, 130, 246, 0.2);
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 </style>
