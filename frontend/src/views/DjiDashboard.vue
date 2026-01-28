@@ -2026,6 +2026,7 @@ export default {
         this.startProtectedAlarmPolling(taskUuid)
       }
     },
+
     resetProtectedTaskContext(clearAlarms = true) {
       this.isProtectedAreaTask = false
       this.currentTaskUuid = ''
