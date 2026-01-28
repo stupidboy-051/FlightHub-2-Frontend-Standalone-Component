@@ -14,6 +14,7 @@
         <h1 class="page-title">无人机巡检主控台</h1>
         <p class="page-subtitle">实时监控与任务管理</p>
       </div>
+
       <div class="mode-switch">
         <button
           class="mode-tab"
