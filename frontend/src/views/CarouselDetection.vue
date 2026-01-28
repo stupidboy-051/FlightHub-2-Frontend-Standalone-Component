@@ -176,7 +176,6 @@
                 <div class="slide-pill" :class="currentSlide.state">
                   第{{ activeIndex + 1 }}张 · {{ currentSlide.stateText }}
                 </div>
-                <div class="slide-pill ghost">ID: {{ currentSlide.id || '—' }}</div>
               </div>
               <div class="slide-body">
                 <div class="slide-image">
@@ -185,7 +184,6 @@
                   <div class="status-tag" :class="currentSlide.state">
                     {{ currentSlide.stateText }}
                   </div>
-                  <div class="status-hint">{{ currentSlide.hint }}</div>
                 </div>
                 <div class="slide-meta">
                   <div class="meta-row">
@@ -237,7 +235,6 @@
               <div class="slide-pill" :class="inspectStatusClass">
                 第{{ inspectIndex + 1 }}张 · {{ inspectStatusText }}
               </div>
-              <div class="slide-pill ghost">ID: {{ currentInspectImage.id || '—' }}</div>
             </div>
             <!-- 当前任务信息 -->
             <div class="task-info-banner">
@@ -255,7 +252,7 @@
               </div>
             </div>
             <div class="slide-body">
-              <div class="slide-image">
+              <div class="slide-image" @click="handleMarqueeClick(currentInspectImage)">
                 <img v-if="getInspectImageUrl(currentInspectImage)" :src="getInspectImageUrl(currentInspectImage)" alt="巡检图片" />
                 <div v-else class="image-placeholder">暂无图片</div>
               </div>
@@ -796,8 +793,8 @@ export default {
       }
     },
     async loadAlarms() {
-      // 增大 page_size 以获取更多异常图片，实现“轮播所有”
-      const params = { page_size: 500, ordering: '-created_at' }
+      // 减少初始加载数量，避免卡顿
+      const params = { page_size: 50, ordering: '-created_at' }
       if (this.selectedWayline) {
         params.wayline_id = this.selectedWayline
       }
@@ -811,13 +808,15 @@ export default {
         }
         return hasImage
       })
-      const sorted = list.sort((a, b) => {
-        const aTime = new Date(a.created_at || 0).getTime()
-        const bTime = new Date(b.created_at || 0).getTime()
-        return bTime - aTime
-      })
-      // 不再截取前10条，而是轮播所有获取到的异常图片
-      this.flowSlides = this.buildSlides(sorted)
+      
+      // 随机打乱数组顺序 (Fisher-Yates Shuffle)
+      const shuffled = [...list]
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      
+      this.flowSlides = this.buildSlides(shuffled)
       this.activeIndex = 0
       this.stopAuto()
       this.startAuto()
@@ -2514,6 +2513,7 @@ export default {
 /* 右侧轮播区域 */
 .carousel-section {
   min-width: 0;
+  height: calc(100vh - 190px);
 }
 
 .flow-card {
@@ -2685,16 +2685,17 @@ export default {
   grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
   gap: 24px;
   align-items: stretch;
-  min-height: 600px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .slide-image {
   position: relative;
   border-radius: 12px;
   overflow: hidden;
-  min-height: 600px;
-  height: 700px;
+  height: 100%;
+  min-height: 0;
   background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.25), transparent 45%), #0b1224;
 }
 
@@ -2777,6 +2778,7 @@ export default {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 12px;
+  overflow-y: auto; /* 元数据过多时可滚动 */
 }
 
 .meta-row {
@@ -3130,5 +3132,89 @@ export default {
     flex-direction: column;
     gap: 10px;
   }
+}
+
+/* 🔥 新增：缩略图条样式 */
+.thumbnail-wrapper {
+  margin-top: 16px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+}
+
+.thumbnail-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  width: 100%;
+  height: 100%;
+  scroll-behavior: smooth;
+  padding-bottom: 4px; /* 预留滚动条空间 */
+}
+
+/* 隐藏滚动条但保留功能 */
+.thumbnail-track::-webkit-scrollbar {
+  height: 4px;
+}
+.thumbnail-track::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+}
+.thumbnail-track::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.3);
+  border-radius: 2px;
+}
+
+.thumbnail-item {
+  flex: 0 0 120px;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+  background: #0b1224;
+}
+
+.thumbnail-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.thumbnail-item:hover img {
+  opacity: 1;
+}
+
+.thumbnail-item.active {
+  border-color: #38bdf8;
+  transform: scale(1.05);
+  z-index: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.thumbnail-item.active img {
+  opacity: 1;
+}
+
+.thumbnail-item.status-error {
+  border-color: #ef4444;
+}
+
+.thumb-number {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 10px;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  font-weight: 700;
 }
 </style>

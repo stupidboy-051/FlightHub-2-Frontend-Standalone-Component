@@ -23,10 +23,10 @@
       <!-- 🔥 新增：检测类型筛选 (Level 1) -->
       <select v-model="categoryFilter" @change="handleCategoryChange" class="filter-select">
         <option value="">全部类型</option>
-        <option value="rail">🛤️ 铁路检测</option>
-        <option value="contactline">⚡ 接触网检测</option>
-        <option value="bridge">🌉 桥梁检测</option>
-        <option value="protected_area">🛡️ 保护区检测</option>
+        <option value="rail">铁路检测</option>
+        <option value="contactline">接触网检测</option>
+        <option value="bridge">桥梁检测</option>
+        <option value="protected_area">保护区检测</option>
       </select>
 
       <!-- 航线筛选 (Level 2) -->
@@ -48,16 +48,16 @@
       <table v-else class="task-table">
         <thead>
           <tr>
-            <th width="80">ID</th>
-            <th width="250">外部任务ID</th>
-            <th width="140">执行设备</th> <!-- 🔥 新增列 -->
+            <th width="6%">ID</th>
+            <th width="18%">外部任务ID</th>
+            <th width="10%">执行设备</th> <!-- 🔥 新增列 -->
             <!-- 🔥 选了检测类型时显示航线和检测类型列 -->
-            <th v-if="categoryFilter" width="180">航线名称</th>
-            <th v-if="categoryFilter" width="120">检测类型</th>
-            <th width="200">创建时间</th>
-            <th width="120">状态</th>
-            <th width="100">已清理</th>
-            <th width="280">操作</th>
+            <th v-if="categoryFilter" width="14%">航线名称</th>
+            <th v-if="categoryFilter" width="8%">检测类型</th>
+            <th width="14%">创建时间</th>
+            <th width="8%">状态</th>
+            <th width="8%">已清理</th>
+            <th width="20%">操作</th> <!-- 增加操作列宽度 -->
           </tr>
         </thead>
         <tbody>
@@ -655,11 +655,12 @@ export default {
 
 /* 表格容器 */
 .table-container {
-  overflow-x: auto;
+  /* overflow-x: auto;  移除横向滚动 */
   overflow-y: auto;
   margin-bottom: 20px;
   flex: 1;
   min-height: 0;
+  scrollbar-gutter: stable; /* 预留滚动条空间防止闪烁 */
 }
 
 /* 加载状态 */

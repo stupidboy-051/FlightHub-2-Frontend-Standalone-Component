@@ -23,6 +23,11 @@ import requests
 import zipfile
 import io
 import re
+import tempfile
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 from django.conf import settings  # 🔥 必须导入 settings
 from .models import WaylineFingerprint, Wayline, AlarmCategory
 
@@ -1281,6 +1286,75 @@ def minio_poller_worker1231():
             traceback.print_exc()
 
         time.sleep(5)
+
+def process_video_task(task, s3_client, bucket, video_key):
+    """
+    [视频处理] 视频切片并回传 MinIO
+    """
+    if not cv2:
+        print("❌ [Video] OpenCV 未安装，跳过视频处理")
+        return
+
+    print(f"🎬 [Video] 开始处理视频: {video_key}")
+    
+    # 下载视频
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_video:
+        try:
+            s3_client.download_fileobj(bucket, video_key, tmp_video)
+            tmp_path = tmp_video.name
+        except Exception as e:
+            print(f"❌ [Video] 下载失败: {e}")
+            return
+
+    try:
+        cap = cv2.VideoCapture(tmp_path)
+        if not cap.isOpened():
+            print("❌ [Video] 无法打开视频")
+            return
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        INTERVAL = 2  # 每2秒一帧
+        frame_interval = int(fps * INTERVAL)
+        
+        folder_prefix = os.path.dirname(video_key) + "/"
+        video_name = os.path.splitext(os.path.basename(video_key))[0]
+        
+        saved_count = 0
+        frame_idx = 0
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret: break
+            
+            if frame_idx % frame_interval == 0:
+                success, buf = cv2.imencode(".jpg", frame)
+                if success:
+                    fname = f"{video_name}_frame_{saved_count:04d}.jpg"
+                    key = folder_prefix + fname
+                    try:
+                        s3_client.put_object(
+                            Bucket=bucket, Key=key, 
+                            Body=io.BytesIO(buf), ContentType="image/jpeg"
+                        )
+                        saved_count += 1
+                    except Exception as e:
+                        print(f"❌ Upload Fail: {e}")
+            frame_idx += 1
+            
+        cap.release()
+        print(f"✅ [Video] 切片完成: {saved_count} 张")
+        
+        # 立即触发同步和检测
+        if saved_count > 0:
+            new_cnt = sync_images_core(task)
+            if new_cnt > 0:
+                threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+
+    except Exception as e:
+        print(f"❌ [Video] 处理异常: {e}")
+    finally:
+        if os.path.exists(tmp_path): os.remove(tmp_path)
+
 def minio_poller_worker2():
     """
     [最终适配版] 智能指纹扫描线程
@@ -1326,15 +1400,26 @@ def minio_poller_worker2():
                 if "Contents" not in page: continue
                 for obj in page["Contents"]:
                     key = obj["Key"]
-                    if not key.lower().endswith((".jpg", ".jpeg")): continue
+                    # 🔥 支持视频文件 (.mp4) 和图片
+                    is_video = key.lower().endswith(".mp4")
+                    is_image = key.lower().endswith((".jpg", ".jpeg"))
+                    
+                    if not (is_image or is_video): continue
 
                     parts = key.split('/')
                     if "media" in parts:
                         idx = parts.index("media")
                         if len(parts) > idx + 2:
                             folder_prefix = "/".join(parts[:idx + 2]) + "/"
+                            
+                            # 策略：优先保留图片作为 sample_key（以便提取UUID），如果只有视频则保留视频
                             if folder_prefix not in found_sub_folders:
                                 found_sub_folders[folder_prefix] = key
+                            else:
+                                # 如果当前存储的是视频，但新发现的是图片，则替换为图片
+                                current_sample = found_sub_folders[folder_prefix]
+                                if current_sample.lower().endswith(".mp4") and is_image:
+                                    found_sub_folders[folder_prefix] = key
 
             # =========================================================
             # 第二步：处理每一个发现的子文件夹 (创建或更新)
@@ -1367,39 +1452,40 @@ def minio_poller_worker2():
                     local_sn = local_task_info.sn if local_task_info else None
                     local_name = local_task_info.name if local_task_info else None
                     
-                    uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
-                    if not uuid:
-                        print(f"⚠️ [Skip] 无法从 {sample_key} 提取 UUID")
-                        continue
-
-                    # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
+                    is_video_task = sample_key.lower().endswith(".mp4")
+                    uuid = None
                     fingerprint = None
-                    all_fps = WaylineFingerprint.objects.all()
-                    print(f"🔍 [Debug] 正在数据库中查找 UUID: {uuid}")
-                    print(f"🔍 [Debug] 数据库中共有 {all_fps.count()} 个指纹记录")
+
+                    if is_video_task:
+                        print(f"🎥 [Video] 识别为视频任务: {sample_key} -> 自动归类为保护区")
+                    else:
+                        uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
+                        if not uuid:
+                            print(f"⚠️ [Skip] 无法从 {sample_key} 提取 UUID")
+                            continue
+
+                        # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
+                        all_fps = WaylineFingerprint.objects.all()
+                        print(f"🔍 [Debug] 正在数据库中查找 UUID: {uuid}")
+                        
+                        for fp in all_fps:
+                            if fp.action_uuids and uuid in fp.action_uuids:
+                                fingerprint = fp
+                                print(f"✅ [Debug] 找到匹配! 航线: {fp.wayline.name}, ID: {fp.id}")
+                                break
                     
-                    for fp in all_fps:
-                        if fp.action_uuids and uuid in fp.action_uuids:
-                            fingerprint = fp
-                            print(f"✅ [Debug] 找到匹配! 航线: {fp.wayline.name}, ID: {fp.id}")
-                            break
-                    
-                    if not fingerprint:
-                        print(f"❌ [Debug] 遍历了所有指纹，未找到匹配的 UUID: {uuid}")
-                        if all_fps.exists() and all_fps.first().action_uuids:
-                             sample_uuid = all_fps.first().action_uuids[0]
-                             print(f"ℹ️ [Debug] 数据库指纹示例 UUID (第一个): {sample_uuid}")
-                             print(f"ℹ️ [Debug] 待匹配 UUID: {uuid}")
-                             print(f"ℹ️ [Debug] 长度比较 - 库中: {len(sample_uuid)}, 提取: {len(uuid)}")
-                    
-                    if not fingerprint:
-                        print(f"⚠️ [Skip] UUID {uuid} 未匹配到任何航线指纹，将创建【未分类】任务以便测试")
-                        # 降级策略：创建未分类任务
+                    if is_video_task or not fingerprint:
+                        if not is_video_task:
+                            print(f"⚠️ [Skip] UUID {uuid} 未匹配到任何航线指纹，将创建【未分类】任务以便测试")
+                            print(f"❌ [Debug] 遍历了所有指纹，未找到匹配的 UUID: {uuid}")
+                        
+                        # 降级策略：创建未分类任务 或 保护区视频任务
                         job_id = folder_uuid
-                        date_str = django_timezone.now().strftime('%Y-%m-%d')
                         
                         # 优先使用本地记录的任务名
                         base_name = local_name if local_name else f"未分类任务-{job_id[-6:]}"
+                        if is_video_task:
+                            base_name = local_name if local_name else f"视频任务-{job_id[-6:]}"
 
                         # 🔥 修改：使用与其他检测类型统一的虚拟父任务命名规则
                         # 格式: "20250110巡检任务" (与保护区检测一致)
@@ -1416,25 +1502,31 @@ def minio_poller_worker2():
                             }
                         )
 
-                        # 创建子任务 (未分类)
-                        child_name = f"{base_name} (未知航线)"
+                        # 确定分类
+                        target_category = None
+                        if is_video_task:
+                            target_category = AlarmCategory.objects.filter(code='protected_area').first()
+
+                        # 创建子任务
+                        child_name = f"{base_name} ({'保护区视频' if is_video_task else '未知航线'})"
                         target_task = InspectTask.objects.create(
                             parent_task=parent_task,
                             external_task_id=folder_uuid,
                             bucket=bucket_name,
                             prefix_list=[folder_prefix],
                             wayline=None,  # 无航线
-                            detect_category=None, # 无分类
+                            detect_category=target_category, # 视频任务有分类
                             detect_status="scanning",
                             last_image_uploaded_at=django_timezone.now(),
                             dji_task_uuid=folder_uuid,
                             dji_task_name=child_name,
                             device_sn=local_sn  # 🔥 填入SN
                         )
-                        print(f"⚠️ 任务创建成功(未分类): {folder_uuid}")
+                        print(f"⚠️ 任务创建成功({'视频/保护区' if is_video_task else '未分类'}): {folder_uuid}")
                         
-                        # 继续处理图片同步，不跳过
-                        # continue  <-- Remove this
+                        # 🔥 如果是视频任务，立即触发切片处理
+                        if is_video_task:
+                            threading.Thread(target=process_video_task, args=(target_task, s3, bucket_name, sample_key)).start()
                     
                     else:
                         # 原有匹配逻辑
