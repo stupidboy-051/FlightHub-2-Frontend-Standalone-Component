@@ -326,7 +326,7 @@ def create_alarm_from_detection(task, img, result_data):
                 if created:
                     print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
                 else:
-                    print(f"ℹ️ [Alarm] 告警已存在，跳过创建。图片ID: {img.id}")
+                    print(f"ℹ️ [Alarm] 告警已存在 (ID: {alarm.id})，跳过创建。图片ID: {img.id}")
                 
                 # 成功则退出循环
                 break
@@ -486,9 +486,25 @@ def auto_trigger_detect1(task):
     safe_save(task, update_fields=['detect_status', 'finished_at'])
     print(f"🏁 [Detect] 任务 {task.id} 结束.")
 
-def process_single_image(img, task, detect_url, algo_type):
+def process_single_image(img, task, detect_url, algo_type, submit_time=None):
     """处理单张图片的逻辑（供并发调用）"""
     import time
+    
+    # 🔥 计算排队时间 (如果提供了提交时间)
+    wait_cost = 0
+    if submit_time:
+        wait_cost = time.time() - submit_time
+    
+    # 🔥 [Double Check] 防止队列积压导致的重复处理
+    # 如果图片已经被其他线程处理完了(status='done')，就直接跳过
+    try:
+        img.refresh_from_db()
+        if img.detect_status == 'done':
+            print(f"⏩ [Skip] 图片 {img.id} 已标记为完成，跳过重复检测")
+            return
+    except Exception:
+        # 如果查询数据库失败（例如被删了），暂不处理，继续后续逻辑尝试
+        pass
     
     # 1. 构造极简请求 (符合之前确认的3字段协议)
     payload = {
@@ -510,11 +526,13 @@ def process_single_image(img, task, detect_url, algo_type):
     try:
         # 🔥 修复 5：增加超时时间到 600 秒（10分钟），适应 GLM-4V 模型处理速度
         # GLM-4V 等大模型处理图片通常需要 1-2 分钟，极端情况可能更长
+        req_start = time.time()
         resp = requests.post(detect_url, json=payload, timeout=600)
+        http_cost = time.time() - req_start
 
         # 🔥 性能监控：记录耗时
         elapsed_time = time.time() - detect_start_time
-        print(f"⏱️ [Detect] 图片 {img.id} 检测耗时: {elapsed_time:.2f} 秒")
+        print(f"⏱️ [Detect] 图片 {img.id} 流程耗时: {elapsed_time:.2f}s (排队等待: {wait_cost:.2f}s, HTTP请求: {http_cost:.2f}s)")
 
         # 🔥 性能警告：如果耗时过长，记录日志
         if elapsed_time > 120:
@@ -524,6 +542,16 @@ def process_single_image(img, task, detect_url, algo_type):
             # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
             # 因为算法返回的是扁平结构
             data = resp.json()
+
+            # 🔥 增强统计：尝试获取算法服务端耗时
+            server_cost = data.get("cost_time") or data.get("inference_time") or data.get("process_time") or data.get("time_cost")
+            if server_cost:
+                try:
+                    s_cost = float(server_cost)
+                    n_cost = http_cost - s_cost
+                    print(f"🔍 [Perf] 图片 {img.id} 耗时拆解 >> 算法内部: {s_cost:.2f}s | 网络传输/排队: {n_cost:.2f}s")
+                except:
+                    pass
 
             img.result = data
             img.detect_status = "done"
@@ -598,9 +626,13 @@ def process_single_image(img, task, detect_url, algo_type):
 # 全局导入
 from concurrent.futures import ThreadPoolExecutor
 
-# 🔥 全局单例线程池：所有任务共享这 4 个 worker
+# 🔥 全局单例线程池：所有任务共享这 1 个 worker
 # 这样可以控制并发总量，且不会因为创建销毁线程池浪费资源
-GLOBAL_DETECT_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="GlobalDetect")
+# ⭐ 修正：将并发数从 4 改为 1。
+# 原因：后台算法使用 GLM-4V 等大模型，通常不支持高并发（显存限制）。
+# 如果并发发送，会导致请求在算法服务端排队，从而导致 HTTP 响应时间虚高（包含排队时间），甚至触发超时。
+# 改为串行处理后，日志记录的耗时将更接近真实的算法推理耗时。
+GLOBAL_DETECT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="GlobalDetect")
 
 def auto_trigger_detect(task):
     """
@@ -646,6 +678,11 @@ def auto_trigger_detect(task):
             algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
 
             # 🔥 核心修改：异步提交任务，不等待 (No Wait)
+            # 💡 优化：由于我们改为了单线程执行 (max_workers=1)，
+            # 如果一次性提交太多任务，后面的任务会排队很久，导致“排队时间”很长。
+            # 但这对系统稳定性有好处，避免了并发请求压垮算法服务。
+            # 只要 Poller 是单线程触发的，这里其实就是顺序入队。
+            current_batch_submit_time = time.time()
             for img in processing_images:
                 # submit 是非阻塞的，瞬间完成
                 GLOBAL_DETECT_EXECUTOR.submit(
@@ -653,7 +690,8 @@ def auto_trigger_detect(task):
                     img, 
                     task, 
                     detect_url, 
-                    algo_type
+                    algo_type,
+                    current_batch_submit_time  # 所有图片共用同一个批次提交时间
                 )
             
             print(f"✅ [Async] 任务 {task.id} 分发完成，后台正在处理中...")
@@ -1411,8 +1449,6 @@ def minio_poller_worker2():
                         idx = parts.index("media")
                         if len(parts) > idx + 2:
                             folder_prefix = "/".join(parts[:idx + 2]) + "/"
-                            
-                            # 策略：优先保留图片作为 sample_key（以便提取UUID），如果只有视频则保留视频
                             if folder_prefix not in found_sub_folders:
                                 found_sub_folders[folder_prefix] = key
                             else:
@@ -1464,23 +1500,32 @@ def minio_poller_worker2():
                             print(f"⚠️ [Skip] 无法从 {sample_key} 提取 UUID")
                             continue
 
-                        # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
+                    # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
+                    fingerprint = None
+                    if uuid:  # 🔥 只有提取到 UUID (即图片任务) 才去查指纹
                         all_fps = WaylineFingerprint.objects.all()
                         print(f"🔍 [Debug] 正在数据库中查找 UUID: {uuid}")
+                        print(f"🔍 [Debug] 数据库中共有 {all_fps.count()} 个指纹记录")
                         
                         for fp in all_fps:
                             if fp.action_uuids and uuid in fp.action_uuids:
                                 fingerprint = fp
                                 print(f"✅ [Debug] 找到匹配! 航线: {fp.wayline.name}, ID: {fp.id}")
                                 break
-                    
-                    if is_video_task or not fingerprint:
-                        if not is_video_task:
-                            print(f"⚠️ [Skip] UUID {uuid} 未匹配到任何航线指纹，将创建【未分类】任务以便测试")
-                            print(f"❌ [Debug] 遍历了所有指纹，未找到匹配的 UUID: {uuid}")
                         
-                        # 降级策略：创建未分类任务 或 保护区视频任务
+                        if not fingerprint:
+                            print(f"❌ [Debug] 遍历了所有指纹，未找到匹配的 UUID: {uuid}")
+                            if all_fps.exists() and all_fps.first().action_uuids:
+                                 sample_uuid = all_fps.first().action_uuids[0]
+                                 print(f"ℹ️ [Debug] 数据库指纹示例 UUID (第一个): {sample_uuid}")
+                                 print(f"ℹ️ [Debug] 待匹配 UUID: {uuid}")
+                                 print(f"ℹ️ [Debug] 长度比较 - 库中: {len(sample_uuid)}, 提取: {len(uuid)}")
+                    
+                    if not fingerprint:
+                        print(f"⚠️ [Skip] UUID {uuid} 未匹配到任何航线指纹，将创建【未分类】任务以便测试")
+                        # 降级策略：创建未分类任务
                         job_id = folder_uuid
+                        date_str = django_timezone.now().strftime('%Y-%m-%d')
                         
                         # 优先使用本地记录的任务名
                         base_name = local_name if local_name else f"未分类任务-{job_id[-6:]}"
@@ -1602,7 +1647,23 @@ def minio_poller_worker2():
                 # B. 如果任务已存在 -> 准备检查增量
                 else:
                     target_task = existing_task
-                    # 如果之前因为超时变成了 done，这里可能会在后面被重新激活
+                    
+                    # 🔥 [自动修复] 如果是视频任务但没有切片图，说明之前处理失败（如缺OpenCV），需要重试
+                    # 注意：sample_key 如果是 mp4，说明该文件夹下尚未发现图片（或者顺序问题），结合数据库计数判断最准
+                    if sample_key.lower().endswith(".mp4"):
+                        img_cnt = InspectImage.objects.filter(inspect_task=target_task).count()
+                        if img_cnt == 0:
+                            # 使用缓存锁防止短时间内重复触发
+                            from django.core.cache import cache
+                            lock_key = f"retry_video_{target_task.id}"
+                            # 设置 5 分钟冷却时间，避免视频处理慢时重复提交
+                            if cache.add(lock_key, True, timeout=300): 
+                                print(f"♻️ [Retry] 发现视频任务 {target_task.external_task_id} 无切片，尝试重新触发处理...")
+                                threading.Thread(target=process_video_task, args=(target_task, s3, bucket_name, sample_key)).start()
+                            else:
+                                # 冷却中，不打印日志以免刷屏
+                                pass
+
                 
                 # =========================================================
                 # 第三步：对该任务执行“图片同步” (无论新旧)
@@ -1652,6 +1713,13 @@ def minio_poller_worker2():
                         # 3. 自动触发检测 (对新图片)
                         #    注意：auto_trigger_detect 内部会找 pending 的图片进行检测
                         threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
+                    else:
+                        # 🔥 修复：即使没有新图片，也要检查是否有挂起的任务需要处理
+                        # 避免因为 sync_images_core 返回 0 而导致之前的 pending 图片卡死
+                        pending_count = target_task.images.filter(detect_status="pending").count()
+                        if pending_count > 0:
+                             # 为了避免日志刷屏，可以只在真的触发时打印
+                             threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
 
             # =========================================================
             # 第四步：全局超时判断 (处理无人机充电/结束的情况)
