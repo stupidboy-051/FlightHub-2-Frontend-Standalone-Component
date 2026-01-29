@@ -155,178 +155,157 @@
 
       <!-- 右侧：轮播展示 -->
       <div class="carousel-section">
-      <div class="flow-card" @mouseenter="stopAuto" @mouseleave="startAuto">
-        <template v-if="!currentInspectTaskId">
+        <div class="flow-card" @mouseenter="stopAuto" @mouseleave="startAuto">
           <div class="card-header">
             <div>
-              <h3 class="card-title">异常检测结果</h3>
-              <p class="card-subtitle">按时间顺序轮播展示已入库的识别结果</p>
+              <h3 class="card-title" v-if="!currentInspectTaskId">异常检测结果</h3>
+              <h3 class="card-title" v-else>{{ isDetectMode ? '实时检测中' : '检测回放' }}</h3>
+              
+              <p class="card-subtitle" v-if="!currentInspectTaskId">按时间顺序轮播展示已入库的识别结果</p>
+              <p class="card-subtitle" v-else>当前任务：{{ currentInspectTaskName || '未选择' }}</p>
             </div>
-            <div class="legend">
-              <span class="legend-dot processing"></span>
-              <span>检测中</span>
-              <span class="legend-dot done"></span>
-              <span>已识别</span>
+            <div class="legend" v-if="!currentInspectTaskId">
+              <span class="legend-dot processing"></span><span>检测中</span>
+              <span class="legend-dot done"></span><span>已识别</span>
+            </div>
+            <div class="legend" v-else>
+              <span class="legend-dot processing"></span><span>检测中</span>
+              <span class="legend-dot done"></span><span>已识别</span>
+              <span class="legend-dot error"></span><span>异常发现</span>
             </div>
           </div>
 
-          <transition name="fade" mode="out-in">
-            <div v-if="currentSlide" :key="currentSlide.key" class="flow-slide">
-              <div class="slide-top">
-                <div class="slide-pill" :class="currentSlide.state">
-                  第{{ activeIndex + 1 }}张 · {{ currentSlide.stateText }}
-                </div>
-              </div>
-              <div class="slide-body">
-                <div class="slide-image">
+          <!-- A. 默认轮播模式 -->
+          <template v-if="!currentInspectTaskId">
+            <transition name="fade" mode="out-in">
+              <div v-if="currentSlide" :key="currentSlide.key" class="flow-slide">
+                <!-- 左侧：图片区域 -->
+                <div class="slide-image-section">
                   <img v-if="currentSlide.image_url" :src="currentSlide.image_url" alt="告警图片" />
                   <div v-else class="image-placeholder">暂无图片</div>
                   <div class="status-tag" :class="currentSlide.state">
                     {{ currentSlide.stateText }}
                   </div>
                 </div>
-                <div class="slide-meta">
-                  <div class="meta-row">
-                    <div class="meta-title">{{ currentSlide.content || '推线检测图片' }}</div>
+
+                <!-- 右侧：信息与控制区域 -->
+                <div class="slide-info-section">
+                  <div class="info-header-group">
+                    <div class="slide-pill" :class="currentSlide.state">
+                      第{{ activeIndex + 1 }}张
+                    </div>
                     <span class="meta-time">{{ formatTime(currentSlide.created_at) }}</span>
                   </div>
-                  <p class="meta-desc">
-                    航线：{{ currentSlide.wayline?.name || currentSlide.wayline_details?.name || '未记录' }} ·
-                    坐标({{ currentSlide.latitude || '—' }}, {{ currentSlide.longitude || '—' }})
-                  </p>
+
+                  <div class="info-scroll-content">
+                    <div class="slide-meta-vertical">
+                      <div class="info-row">
+                        <span class="info-label">检测内容</span>
+                        <span class="info-val">{{ currentSlide.content || '推线检测图片' }}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">所属航线</span>
+                        <span class="info-val">{{ currentSlide.wayline?.name || currentSlide.wayline_details?.name || '未记录' }}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">地理坐标</span>
+                        <span class="info-val">{{ currentSlide.latitude || '-' }}, {{ currentSlide.longitude || '-' }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="info-controls-grid">
+                    <button class="control-btn ghost" @click="prevSlide">上一张</button>
+                    <button class="control-btn ghost" @click="nextSlide">下一张</button>
+                    <div class="progress-count-badge" style="grid-column: span 2; text-align: center;">
+                      {{ activeIndex + 1 }} / {{ flowSlides.length }}
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div v-else key="empty" class="flow-slide empty">
-              <p>暂无带图片的告警记录</p>
-            </div>
-          </transition>
+              <div v-else key="empty" class="flow-slide empty">
+                <p>暂无带图片的告警记录</p>
+              </div>
+            </transition>
+          </template>
 
-          <div v-if="flowSlides.length > 1" class="controls">
-            <button class="control-btn ghost" @click="prevSlide">上一张</button>
-            <div class="progress-count">
-              {{ activeIndex + 1 }}/{{ flowSlides.length }}
+          <!-- B. 巡检回放模式 -->
+          <template v-else>
+            <div v-if="!currentInspectImage && !inspectImages.length" class="flow-slide empty">
+              <p>等待检测图片产生...</p>
             </div>
-            <button class="control-btn ghost" @click="nextSlide">下一张</button>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">{{ isDetectMode ? '实时检测中' : '检测回放' }}</h3>
-              <p class="card-subtitle">当前任务：{{ currentInspectTaskName || '未选择' }}</p>
-            </div>
-            <div class="legend" v-if="currentInspectTaskId">
-              <span class="legend-dot processing"></span>
-              <span>检测中</span>
-              <span class="legend-dot done"></span>
-              <span>已识别</span>
-              <span class="legend-dot error"></span>
-              <span>异常发现</span>
-            </div>
-          </div>
-
-          <div v-if="!currentInspectImage && !inspectImages.length" class="flow-slide empty">
-            <p>等待检测图片产生...</p>
-          </div>
-          <div v-else-if="currentInspectImage" class="flow-slide">
-            <div class="slide-top">
-              <div class="slide-pill" :class="inspectStatusClass">
-                第{{ inspectIndex + 1 }}张 · {{ inspectStatusText }}
-              </div>
-            </div>
-            <!-- 当前任务信息 -->
-            <div class="task-info-banner">
-              <div class="task-info-item">
-                <span class="task-label">执行任务：</span>
-                <span class="task-value">{{ currentParentTaskName || '未知' }}</span>
-              </div>
-              <div class="task-info-item">
-                <span class="task-label">当前子任务：</span>
-                <span class="task-value">{{ currentSubTaskName || '未知' }}</span>
-              </div>
-              <div class="task-info-item">
-                <span class="task-label">检测类型：</span>
-                <span class="task-value">{{ currentDetectionType || '未知' }}</span>
-              </div>
-            </div>
-            <div class="slide-body">
-              <div class="slide-image" @click="handleMarqueeClick(currentInspectImage)">
+            <div v-else-if="currentInspectImage" class="flow-slide">
+              <!-- 左侧：图片区域 -->
+              <div class="slide-image-section" @click="handleMarqueeClick(currentInspectImage)">
                 <img v-if="getInspectImageUrl(currentInspectImage)" :src="getInspectImageUrl(currentInspectImage)" alt="巡检图片" />
                 <div v-else class="image-placeholder">暂无图片</div>
               </div>
-              <div class="slide-meta">
-                <div class="meta-row">
-                  <div class="status-tag-inline" :class="inspectStatusClass">
+
+              <!-- 右侧：信息与控制区域 -->
+              <div class="slide-info-section">
+                <div class="info-header-group">
+                  <div class="slide-pill" :class="inspectStatusClass">
                     {{ inspectStatusText }}
                   </div>
-                </div>
-                <div class="meta-row">
-                  <div class="meta-title">巡检图片</div>
                   <span class="meta-time">{{ formatTime(currentInspectImage.created_at) }}</span>
                 </div>
-                <p class="meta-desc" v-if="currentInspectImage.result_info">
-                  {{ getDefectsDescription(currentInspectImage.result_info) }}
-                </p>
-                <p class="meta-desc">
-                  任务：{{ currentInspectTaskName || currentInspectImage.inspect_task }}
-                </p>
-              </div>
-            </div>
 
-            <div class="controls">
-              <button
-                class="control-btn ghost"
-                @click="inspectIndex = Math.max(inspectIndex - 1, 0)"
-                :disabled="inspectIndex === 0"
-              >
-                上一张
-              </button>
-              <div class="progress-count">
-                {{ inspectIndex + 1 }}/{{ inspectImages.length }}
+                <div class="info-scroll-content">
+                  <div class="task-info-vertical">
+                    <div class="info-row">
+                      <span class="info-label">父任务</span>
+                      <span class="info-val">{{ currentParentTaskName || '未知' }}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">子任务</span>
+                      <span class="info-val">{{ currentSubTaskName || '未知' }}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">类型</span>
+                      <span class="info-val">{{ currentDetectionType || '未知' }}</span>
+                    </div>
+                  </div>
+
+                  <div class="slide-meta-vertical">
+                    <div class="info-row">
+                      <span class="info-label">识别结果</span>
+                      <span class="info-val" :class="{'text-red-400': currentInspectImage.status01 === 1}">
+                        {{ getDefectsDescription(currentInspectImage.result_info) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="info-controls-grid">
+                  <button class="control-btn ghost" @click="inspectIndex = Math.max(inspectIndex - 1, 0)" :disabled="inspectIndex === 0">
+                    上一张
+                  </button>
+                  <button class="control-btn ghost" 
+                    v-if="!inspectPausedOnAnomaly"
+                    @click="inspectIndex = Math.min(inspectIndex + 1, Math.max(inspectImages.length - 1, 0))" 
+                    :disabled="inspectIndex >= inspectImages.length - 1">
+                    下一张
+                  </button>
+                  <button class="control-btn primary" v-else @click="confirmContinueAfterAnomaly">
+                    确认继续
+                  </button>
+
+                  <button class="control-btn ghost" @click="toggleInspectPlaybackPause" :disabled="!inspectImages.length">
+                    {{ inspectPlaybackPaused ? '继续播放' : '暂停播放' }}
+                  </button>
+                  
+                  <button class="control-btn danger-ghost" @click="reportSuspicious(currentInspectImage)">
+                    误报反馈
+                  </button>
+
+                  <div class="progress-count-badge" style="grid-column: span 2; text-align: center; margin-top: 5px;">
+                    {{ inspectIndex + 1 }} / {{ inspectImages.length }}
+                  </div>
+                </div>
               </div>
-              <button
-                class="control-btn ghost"
-                @click="toggleInspectPlaybackPause"
-                :disabled="!inspectImages.length"
-              >
-                {{ inspectPlaybackPaused ? '继续' : '暂停' }}
-              </button>
-              <button
-                class="control-btn ghost"
-                @click="jumpToLatestInspectImage"
-                :disabled="!inspectImages.length || inspectIndex >= inspectImages.length - 1"
-              >
-                跳到最新
-              </button>
-              <button
-                v-if="inspectPausedOnAnomaly"
-                class="control-btn"
-                @click="confirmContinueAfterAnomaly"
-              >
-                确认继续
-              </button>
-              <button
-                v-else
-                class="control-btn ghost"
-                @click="inspectIndex = Math.min(inspectIndex + 1, Math.max(inspectImages.length - 1, 0))"
-                :disabled="inspectIndex >= inspectImages.length - 1"
-              >
-                下一张
-              </button>
-              <button
-                class="control-btn"
-                style="margin-left: 10px; border-color: #ff4d4f; color: #ff4d4f;"
-                @click="reportSuspicious(currentInspectImage)"
-                title="标记为存疑或误报"
-              >
-                误报反馈
-              </button>
             </div>
-          </div>
-        </template>
-      </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -361,8 +340,7 @@ import alarmApi from '../api/alarmApi'
 import waylineApi from '../api/waylineApi'
 import waylineImageApi from '../api/waylineImageApi'
 import inspectTaskApi from '../api/inspectTaskApi'
-import suspiciousImageApi from '../api/suspiciousImageApi'
-import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 
 export default {
   name: 'CarouselDetection',
@@ -793,8 +771,8 @@ export default {
       }
     },
     async loadAlarms() {
-      // 减少初始加载数量，避免卡顿
-      const params = { page_size: 50, ordering: '-created_at' }
+      // 增大 page_size 以获取更多异常图片，实现“轮播所有”
+      const params = { page_size: 500, ordering: '-created_at' }
       if (this.selectedWayline) {
         params.wayline_id = this.selectedWayline
       }
@@ -808,15 +786,13 @@ export default {
         }
         return hasImage
       })
-      
-      // 随机打乱数组顺序 (Fisher-Yates Shuffle)
-      const shuffled = [...list]
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
-      
-      this.flowSlides = this.buildSlides(shuffled)
+      const sorted = list.sort((a, b) => {
+        const aTime = new Date(a.created_at || 0).getTime()
+        const bTime = new Date(b.created_at || 0).getTime()
+        return bTime - aTime
+      })
+      // 不再截取前10条，而是轮播所有获取到的异常图片
+      this.flowSlides = this.buildSlides(sorted)
       this.activeIndex = 0
       this.stopAuto()
       this.startAuto()
@@ -971,40 +947,6 @@ export default {
       this.allTasksCompleted = false // 重置完成标志
       await this.startInspectPlaybackForFolder(taskOrName)
     },
-    async reportSuspicious(image) {
-      if (!image) return
-      
-      try {
-        await ElMessageBox.prompt('请填写存疑/误报原因（选填）', '误报反馈', {
-          confirmButtonText: '提交',
-          cancelButtonText: '取消',
-          inputPattern: /.*/,
-          inputPlaceholder: '例如：检测框位置不准确 / 并非目标物体'
-        }).then(async ({ value }) => {
-          // 优先使用永久路径，如果没有则使用签名URL
-          const imageUrl = image.result_url || image.url || image.path || image.result_signed_url || image.signed_url;
-          
-          const payload = {
-            image_path: imageUrl, 
-            note: value,
-            inspect_image: image.id
-          }
-          
-          await suspiciousImageApi.reportSuspiciousImage(payload)
-          ElNotification({
-            title: '反馈成功',
-            message: '已将该图片标记为存疑',
-            type: 'success'
-          })
-        })
-      } catch (error) {
-        if (error !== 'cancel') {
-          console.error(error)
-          ElMessage.error('反馈提交失败')
-        }
-      }
-    },
-
     handleWaylineChange() {
       this.activeIndex = 0
       this.stopAuto()
@@ -1457,17 +1399,11 @@ export default {
           // C. 如果有任务但不属于 A 中的航线，也需要补全 (防止漏掉数据)
 
           // Step A: 获取航线骨架 (减少 N+1，但保证结构正确)
-          let waylines = []
-          if (category.code === 'unknown') {
-            // 如果是 unknown 类型，不进行航线筛选，直接获取任务
-            waylines = []
-          } else {
-            const waylineRes = await waylineApi.getWaylines({
-               detect_type: category.code, 
-               page_size: 100
-            })
-            waylines = this.normalizeList(waylineRes)
-          }
+          const waylineRes = await waylineApi.getWaylines({
+             detect_type: category.code, 
+             page_size: 100
+          })
+          const waylines = this.normalizeList(waylineRes)
           
           const waylineMap = new Map()
           
@@ -1803,10 +1739,17 @@ export default {
 
 <style scoped>
 .carousel-detection-page {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 24px 18px 48px;
+  position: absolute;
+  top: -24px;
+  bottom: -24px;
+  left: -24px;
+  right: -24px;
+  background: #0b1224;
+  padding: 12px 24px 0;
   color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .page-header {
@@ -1814,7 +1757,9 @@ export default {
   justify-content: space-between;
   gap: 18px;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 4px;
+  transform: scale(0.95);
+  transform-origin: left center;
 }
 
 .header-left {
@@ -2111,8 +2056,10 @@ export default {
   display: grid;
   grid-template-columns: 360px 1fr;
   gap: 24px;
-  align-items: start;
+  align-items: stretch;
   width: 100%;
+  flex: 1;
+  overflow: hidden;
 }
 
 /* 左侧预扫描区域 */
@@ -2513,7 +2460,10 @@ export default {
 /* 右侧轮播区域 */
 .carousel-section {
   min-width: 0;
-  height: calc(100vh - 190px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .flow-card {
@@ -2599,30 +2549,115 @@ export default {
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 14px;
-  padding: 14px;
-  min-height: 360px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 340px; /* 左图右信 */
+  overflow: hidden;
 }
 
 .flow-slide.empty {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   color: #94a3b8;
+  grid-template-columns: 1fr; /* 空状态单列 */
 }
 
-.slide-top {
+/* 左侧图片区域 */
+.slide-image-section {
+  position: relative;
+  height: 100%;
+  background: #0b1224;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.slide-image-section img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 14px;
+  background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05) 10px, rgba(255, 255, 255, 0.02) 10px, rgba(255, 255, 255, 0.02) 20px);
+}
+
+/* 右侧信息区域 */
+.slide-info-section {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.6);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  min-width: 0;
+  height: 100%;
+}
+
+.info-header-group {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.info-scroll-content {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  padding-right: 4px;
+}
+
+.info-scroll-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.info-scroll-content::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.2);
+  border-radius: 2px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.info-label {
+  color: #94a3b8;
+}
+
+.info-val {
+  color: #e2e8f0;
+  font-weight: 500;
+  text-align: right;
+  max-width: 60%;
+}
+
+.info-controls-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: auto;
 }
 
 .slide-pill {
-  padding: 8px 12px;
-  border-radius: 10px;
+  padding: 6px 12px;
+  border-radius: 8px;
   font-weight: 700;
   font-size: 13px;
 }
@@ -2643,67 +2678,6 @@ export default {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.5);
   color: #fecaca;
-}
-
-.slide-pill.ghost {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #cbd5e1;
-}
-
-/* 任务信息横幅 */
-.task-info-banner {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.25);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-
-.task-info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.task-label {
-  font-size: 11px;
-  color: #94a3b8;
-  font-weight: 500;
-}
-
-.task-value {
-  font-size: 13px;
-  color: #e0f2fe;
-  font-weight: 600;
-}
-
-.slide-body {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
-  gap: 24px;
-  align-items: stretch;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.slide-image {
-  position: relative;
-  border-radius: 12px;
-  overflow: hidden;
-  height: 100%;
-  min-height: 0;
-  background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.25), transparent 45%), #0b1224;
-}
-
-.slide-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain; /* 改为 contain 完整显示图片 */
-  display: block;
 }
 
 .image-placeholder {
@@ -2778,7 +2752,6 @@ export default {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 12px;
-  overflow-y: auto; /* 元数据过多时可滚动 */
 }
 
 .meta-row {
@@ -3132,89 +3105,5 @@ export default {
     flex-direction: column;
     gap: 10px;
   }
-}
-
-/* 🔥 新增：缩略图条样式 */
-.thumbnail-wrapper {
-  margin-top: 16px;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(14, 165, 233, 0.2);
-  border-radius: 12px;
-  padding: 10px;
-  height: 100px;
-  display: flex;
-  align-items: center;
-}
-
-.thumbnail-track {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  width: 100%;
-  height: 100%;
-  scroll-behavior: smooth;
-  padding-bottom: 4px; /* 预留滚动条空间 */
-}
-
-/* 隐藏滚动条但保留功能 */
-.thumbnail-track::-webkit-scrollbar {
-  height: 4px;
-}
-.thumbnail-track::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 2px;
-}
-.thumbnail-track::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.3);
-  border-radius: 2px;
-}
-
-.thumbnail-item {
-  flex: 0 0 120px;
-  height: 100%;
-  border-radius: 8px;
-  overflow: hidden;
-  position: relative;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.2s ease;
-  background: #0b1224;
-}
-
-.thumbnail-item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0.6;
-  transition: opacity 0.2s;
-}
-
-.thumbnail-item:hover img {
-  opacity: 1;
-}
-
-.thumbnail-item.active {
-  border-color: #38bdf8;
-  transform: scale(1.05);
-  z-index: 1;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-}
-
-.thumbnail-item.active img {
-  opacity: 1;
-}
-
-.thumbnail-item.status-error {
-  border-color: #ef4444;
-}
-
-.thumb-number {
-  position: absolute;
-  bottom: 2px;
-  right: 4px;
-  font-size: 10px;
-  color: white;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-  font-weight: 700;
 }
 </style>
