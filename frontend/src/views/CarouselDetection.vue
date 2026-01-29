@@ -154,7 +154,7 @@
       </div>
 
       <!-- 右侧：轮播展示 -->
-      <div class="carousel-section">
+        <div class="carousel-section">
         <div class="flow-card" @mouseenter="stopAuto" @mouseleave="startAuto">
           <div class="card-header">
             <div>
@@ -237,8 +237,15 @@
             <div v-else-if="currentInspectImage" class="flow-slide">
               <!-- 左侧：图片区域 -->
               <div class="slide-image-section" @click="handleMarqueeClick(currentInspectImage)">
-                <img v-if="getInspectImageUrl(currentInspectImage)" :src="getInspectImageUrl(currentInspectImage)" alt="巡检图片" />
-                <div v-else class="image-placeholder">暂无图片</div>
+                <img 
+                  v-if="getInspectImageUrl(currentInspectImage) && !imageLoadError" 
+                  :src="getInspectImageUrl(currentInspectImage)" 
+                  alt="巡检图片" 
+                  @error="handleImageError"
+                />
+                <div v-else class="image-placeholder">
+                  {{ imageLoadError ? '图片加载失败' : '暂无图片' }}
+                </div>
               </div>
 
               <!-- 右侧：信息与控制区域 -->
@@ -401,7 +408,13 @@ export default {
       expandedWaylines: new Set(),
       selectedHistoryTask: null,
       latestManualTaskId: null,
-      taskProgressMap: {} // 记录每个任务的播放进度
+      taskProgressMap: {}, // 记录每个任务的播放进度
+      imageLoadError: false // 图片加载失败状态
+    }
+  },
+  watch: {
+    currentInspectImage() {
+      this.imageLoadError = false
     }
   },
   computed: {
@@ -1732,6 +1745,9 @@ export default {
       if (isNaN(dt.getTime())) return '--'
       const pad = num => String(num).padStart(2, '0')
       return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+    },
+    handleImageError() {
+      this.imageLoadError = true
     }
   }
 }
