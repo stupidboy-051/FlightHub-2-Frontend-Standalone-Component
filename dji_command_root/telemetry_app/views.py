@@ -72,6 +72,7 @@ from .serializers import (
     WaylineImageSerializer, UserSerializer, UserCreateSerializer,
     LoginSerializer, TokenSerializer, ComponentConfigSerializer,
     MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer,
+    InspectImageListSerializer,
     DronePositionSerializer, DockStatusSerializer, FlightTaskInfoSerializer,
     SuspiciousImageSerializer
 )
@@ -380,7 +381,8 @@ def normalize_detect_code(code):
         return normalized
     if low in {"rail", "contactline", "bridge", "protected_area"}:
         return low
-    return "rail"
+    # 🔥 修复：不认识的类型不要默认返回 rail，否则会导致 unknown 类型匹配到 rail 的关键词
+    return raw
 
 def auto_trigger_detect1(task):
     """
@@ -1939,8 +1941,11 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
     def images(self, request, pk=None):
         """返回某个巡检任务下的所有图片及检测状态，按时间顺序排序"""
         task = self.get_object()
-        queryset = InspectImage.objects.filter(inspect_task=task).order_by("created_at", "id")
-        serializer = InspectImageSerializer(queryset, many=True)
+        # 🔥 优化：使用 select_related 预加载关联字段，避免 N+1
+        # 虽然 inspect_task 已知，但 serializer 的 method field (get_signed_url) 可能仍需访问 task 属性
+        queryset = InspectImage.objects.filter(inspect_task=task).select_related('inspect_task').order_by("created_at", "id")
+        # 🔥 优化：使用轻量级 Serializer，移除 inspect_task_details
+        serializer = InspectImageListSerializer(queryset, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"])
@@ -2047,8 +2052,6 @@ class WaylineViewSet(viewsets.ModelViewSet):
     search_fields = ['wayline_id', 'name', 'description', 'created_by']
     ordering_fields = ['created_at', 'updated_at', 'status', 'name']
     ordering = ['-created_at']
-    # 禁用分页，返回所有航线数据（适用于数据量不大的场景）
-    pagination_class = None
 
     filterset_fields = {
         'wayline_id': ['exact', 'icontains'],
@@ -2664,7 +2667,9 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         print(f"🔄 [循环启动] Stream: {stream_id} | 开始进入主循环")
 
         # 循环抽帧（直到收到停止信号）
+        from django.db import close_old_connections
         while not stop_event.is_set():
+            close_old_connections()
             loop_count += 1
             loop_start_time = time_module.time()
 
@@ -3565,9 +3570,30 @@ class WaylineFingerprintManager:
                 w_name_str = str(w_name)
                 w_name_lower = w_name_str.lower()
 
+                # 🔥 优化：数据库优先策略
+                # 如果数据库中已经存在该航线且有类型，直接使用数据库中的类型
+                existing_wayline = Wayline.objects.filter(wayline_id=w_id).first()
                 matched_category = None
-                for cat in categories:
-                    norm_code = normalize_detect_code(cat.code)
+
+                if existing_wayline and existing_wayline.detect_type:
+                    # 尝试从数据库类型反查 category 对象
+                    # 注意：existing_wayline.detect_type 存储的是 normalized code (如 rail, bridge)
+                    # 我们需要找到对应的 AlarmCategory
+                    db_type = existing_wayline.detect_type
+                    
+                    # 优先匹配 code 完全一致的
+                    matched_category = next((c for c in categories if normalize_detect_code(c.code) == db_type), None)
+                    
+                    if matched_category:
+                        print(f"   ✅ [Database] 航线 '{w_name_str}' 使用已有类型: {matched_category.name} ({db_type})")
+                    else:
+                        # 如果找不到对应的 category (比如类型被删了)，回退到关键词匹配
+                        print(f"   ⚠️ [Database] 航线 '{w_name_str}' 有类型 {db_type} 但未找到对应分类配置，尝试重新匹配...")
+
+                # 如果数据库没有匹配到，则尝试关键词匹配
+                if not matched_category:
+                    for cat in categories:
+                     norm_code = normalize_detect_code(cat.code)
                     keyword_map = {
                         "rail": ["rail", "铁路", "轨道"],
                         "contactline": ["contactline", "接触网", "catenary", "overhead"],

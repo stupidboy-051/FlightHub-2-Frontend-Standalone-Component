@@ -437,6 +437,15 @@ class InspectImageSerializer(serializers.ModelSerializer):
         return 0
 
 
+class InspectImageListSerializer(InspectImageSerializer):
+    """
+    轻量级巡检图片序列化：用于列表展示，移除冗余的任务详情 (inspect_task_details)
+    以解决 N+1 查询问题并减少数据传输量
+    """
+    class Meta(InspectImageSerializer.Meta):
+        fields = [f for f in InspectImageSerializer.Meta.fields if f != "inspect_task_details"]
+
+
 class DronePositionSerializer(serializers.ModelSerializer):
     """
     无人机位置信息序列化器

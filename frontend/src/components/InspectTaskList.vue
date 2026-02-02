@@ -3,7 +3,6 @@
     <!-- 搜索和筛选 -->
     <div class="search-filters-premium">
       <div class="search-wrapper">
-        <div class="search-icon">🔍</div>
         <input 
           v-model="searchQuery"
           @input="handleSearch"
@@ -12,30 +11,55 @@
         />
       </div>
       
-      <select v-model="statusFilter" @change="loadTasks" class="filter-select">
-        <option value="">全部状态</option>
-        <option value="pending">待检测</option>
-        <option value="processing">检测中</option>
-        <option value="done">已完成</option>
-        <option value="failed">失败</option>
-      </select>
+      <!-- 自定义下拉框 - 状态筛选 -->
+      <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('status')">
+        <div class="custom-select-trigger" @click="toggleDropdown('status')" :class="{ 'is-open': activeDropdown === 'status' }">
+          <span>{{ getStatusLabel(statusFilter) || '全部状态' }}</span>
+          <span class="arrow-icon">▼</span>
+        </div>
+        <div v-show="activeDropdown === 'status'" class="custom-select-options">
+          <div class="option-item" :class="{ 'is-selected': statusFilter === '' }" @click="selectStatus('')">全部状态</div>
+          <div class="option-item" :class="{ 'is-selected': statusFilter === 'pending' }" @click="selectStatus('pending')">待检测</div>
+          <div class="option-item" :class="{ 'is-selected': statusFilter === 'processing' }" @click="selectStatus('processing')">检测中</div>
+          <div class="option-item" :class="{ 'is-selected': statusFilter === 'done' }" @click="selectStatus('done')">已完成</div>
+          <div class="option-item" :class="{ 'is-selected': statusFilter === 'failed' }" @click="selectStatus('failed')">失败</div>
+        </div>
+      </div>
       
-      <!-- 🔥 新增：检测类型筛选 (Level 1) -->
-      <select v-model="categoryFilter" @change="handleCategoryChange" class="filter-select">
-        <option value="">全部类型</option>
-        <option value="rail">铁路检测</option>
-        <option value="contactline">接触网检测</option>
-        <option value="bridge">桥梁检测</option>
-        <option value="protected_area">保护区检测</option>
-      </select>
+      <!-- 自定义下拉框 - 检测类型筛选 (Level 1) -->
+      <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('category')">
+        <div class="custom-select-trigger" @click="toggleDropdown('category')" :class="{ 'is-open': activeDropdown === 'category' }">
+          <span>{{ getCategoryLabel(categoryFilter) || '全部类型' }}</span>
+          <span class="arrow-icon">▼</span>
+        </div>
+        <div v-show="activeDropdown === 'category'" class="custom-select-options">
+          <div class="option-item" :class="{ 'is-selected': categoryFilter === '' }" @click="selectCategory('')">全部类型</div>
+          <div class="option-item" :class="{ 'is-selected': categoryFilter === 'rail' }" @click="selectCategory('rail')">铁路检测</div>
+          <div class="option-item" :class="{ 'is-selected': categoryFilter === 'contactline' }" @click="selectCategory('contactline')">接触网检测</div>
+          <div class="option-item" :class="{ 'is-selected': categoryFilter === 'bridge' }" @click="selectCategory('bridge')">桥梁检测</div>
+          <div class="option-item" :class="{ 'is-selected': categoryFilter === 'protected_area' }" @click="selectCategory('protected_area')">保护区检测</div>
+        </div>
+      </div>
 
-      <!-- 航线筛选 (Level 2) -->
-      <select v-model="waylineFilter" @change="loadTasks" class="filter-select">
-        <option value="">全部航线</option>
-        <option v-for="wayline in filteredWaylines" :key="wayline.id" :value="wayline.id">
-          {{ wayline.name }}
-        </option>
-      </select>
+      <!-- 自定义下拉框 - 航线筛选 (Level 2) -->
+      <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('wayline')">
+        <div class="custom-select-trigger" @click="toggleDropdown('wayline')" :class="{ 'is-open': activeDropdown === 'wayline' }">
+          <span>{{ getWaylineLabel(waylineFilter) || '全部航线' }}</span>
+          <span class="arrow-icon">▼</span>
+        </div>
+        <div v-show="activeDropdown === 'wayline'" class="custom-select-options">
+          <div class="option-item" :class="{ 'is-selected': waylineFilter === '' }" @click="selectWayline('')">全部航线</div>
+          <div 
+            v-for="wayline in filteredWaylines" 
+            :key="wayline.id" 
+            class="option-item"
+            :class="{ 'is-selected': waylineFilter === wayline.id }"
+            @click="selectWayline(wayline.id)"
+          >
+            {{ wayline.name }}
+          </div>
+        </div>
+      </div>
     </div>
     
     <!-- 任务表格 -->
@@ -300,7 +324,23 @@ export default {
       showDetailDialog: false,
       currentTask: null,
       showSubTaskDialog: false,
-      subTasks: []
+      subTasks: [],
+      activeDropdown: '' // 当前打开的下拉框：'status' | 'category' | 'wayline' | ''
+    }
+  },
+  directives: {
+    'click-outside': {
+      mounted(el, binding) {
+        el.clickOutsideEvent = function(event) {
+          if (!(el === event.target || el.contains(event.target))) {
+            binding.value(event)
+          }
+        }
+        document.body.addEventListener('click', el.clickOutsideEvent)
+      },
+      unmounted(el) {
+        document.body.removeEventListener('click', el.clickOutsideEvent)
+      }
     }
   },
   async mounted() {
@@ -323,9 +363,52 @@ export default {
       this.currentPage = 1
       this.loadTasks()
     },
+    // 下拉框控制方法
+    toggleDropdown(type) {
+      if (this.activeDropdown === type) {
+        this.activeDropdown = ''
+      } else {
+        this.activeDropdown = type
+      }
+    },
+    closeDropdown(type) {
+      if (this.activeDropdown === type) {
+        this.activeDropdown = ''
+      }
+    },
+    // 选项选择方法
+    selectStatus(status) {
+      this.statusFilter = status
+      this.activeDropdown = ''
+      this.loadTasks()
+    },
+    selectCategory(category) {
+      this.categoryFilter = category
+      this.activeDropdown = ''
+      this.handleCategoryChange()
+    },
+    selectWayline(id) {
+      this.waylineFilter = id
+      this.activeDropdown = ''
+      this.loadTasks()
+    },
+    // 获取显示标签
+    getStatusLabel(status) {
+      if (!status) return ''
+      return this.getStatusText(status)
+    },
+    getCategoryLabel(category) {
+      if (!category) return ''
+      return this.getCategoryName(category)
+    },
+    getWaylineLabel(id) {
+      if (!id) return ''
+      const wayline = this.waylines.find(w => w.id === id)
+      return wayline ? wayline.name : id
+    },
     async loadWaylines() {
       try {
-        const response = await waylineApi.getWaylines({ page_size: 1000 })
+        const response = await waylineApi.getWaylines({ page_size: 100 })
         console.log('📋 [航线列表] 响应数据:', response)
         // 🔥 修复：后端禁用了分页，直接返回数组，而不是 {results: [...]}
         this.waylines = Array.isArray(response) ? response : (response?.results || [])
@@ -611,20 +694,14 @@ export default {
   min-width: 250px;
 }
 
-.search-icon {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 16px;
-}
+/* 移除旧的 search-icon 样式 */
 
 .search-input {
   width: 100%;
-  padding: 10px 14px 10px 40px;
+  padding: 12px 16px; /* 调整 padding，移除左侧图标的空隙 */
   background: rgba(10, 14, 39, 0.6);
   border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
+  border-radius: 10px; /* 统一圆角 */
   color: #e2e8f0;
   font-size: 14px;
   transition: all 0.3s ease;
@@ -636,21 +713,122 @@ export default {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-.filter-select {
-  padding: 10px 14px;
+/* 自定义下拉框样式 - 复用 AlarmList.vue */
+.custom-select-wrapper {
+  position: relative;
+  min-width: 160px; /* 默认宽度 */
+}
+
+/* 航线筛选特殊宽度 */
+.custom-select-wrapper:last-child {
+  min-width: 240px;
+}
+
+.custom-select-trigger {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
   background: rgba(10, 14, 39, 0.6);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.3); /* 使用蓝色系边框 */
+  border-radius: 10px;
   color: #e2e8f0;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
+  user-select: none;
 }
 
-.filter-select:focus {
-  outline: none;
+.custom-select-trigger:hover,
+.custom-select-trigger.is-open {
   border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+  background: rgba(10, 14, 39, 0.8);
+}
+
+.custom-select-trigger span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 8px;
+}
+
+.arrow-icon {
+  font-size: 10px;
+  color: #64748b;
+  transition: transform 0.3s ease;
+  margin-left: 8px;
+}
+
+.custom-select-trigger.is-open .arrow-icon {
+  transform: rotate(180deg);
+  color: #3b82f6;
+}
+
+.custom-select-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+  animation: dropdownFadeIn 0.2s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.option-item {
+  padding: 10px 16px;
+  color: #cbd5e1;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.option-item:last-child {
+  border-bottom: none;
+}
+
+.option-item:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #fff;
+}
+
+.option-item.is-selected {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+/* 滚动条美化 */
+.custom-select-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-select-options::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.custom-select-options::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.3);
+  border-radius: 3px;
+}
+
+.custom-select-options::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.5);
 }
 
 /* 表格容器 */

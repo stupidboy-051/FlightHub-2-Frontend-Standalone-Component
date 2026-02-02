@@ -2,6 +2,29 @@
   <div class="dock-status-panel">
     <!-- 头部操作栏 -->
     <div class="panel-header">
+      <!-- 统计概览 - 嵌入式 -->
+      <div class="status-summary">
+        <!-- <div class="summary-item">
+          <span class="summary-label">总数:</span>
+          <span class="summary-value">{{ statistics.total_docks }}</span>
+        </div> -->
+        <div class="summary-item online">
+          <span class="summary-icon">✅</span>
+          <span class="summary-label">在线:</span>
+          <span class="summary-value">{{ statistics.online_docks }}</span>
+        </div>
+        <div class="summary-item offline">
+          <span class="summary-icon">❌</span>
+          <span class="summary-label">离线:</span>
+          <span class="summary-value">{{ statistics.offline_docks }}</span>
+        </div>
+        <div class="summary-item alarm">
+          <span class="summary-icon">⚠️</span>
+          <span class="summary-label">告警:</span>
+          <span class="summary-value">{{ statistics.alarm_docks }}</span>
+        </div>
+      </div>
+
       <div class="header-actions">
         <button @click="refreshData" class="btn-refresh" :disabled="loading">
           <span v-if="!loading">🔄</span>
@@ -9,38 +32,6 @@
           刷新
         </button>
         <span class="update-time">更新: {{ lastUpdateTime }}</span>
-      </div>
-    </div>
-
-    <!-- 统计卡片 -->
-    <div class="statistics-cards">
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-content">
-          <div class="stat-value">{{ statistics.total_docks }}</div>
-          <div class="stat-label">机场总数</div>
-        </div>
-      </div>
-      <div class="stat-card online">
-        <div class="stat-icon">✅</div>
-        <div class="stat-content">
-          <div class="stat-value">{{ statistics.online_docks }}</div>
-          <div class="stat-label">在线机场</div>
-        </div>
-      </div>
-      <div class="stat-card offline">
-        <div class="stat-icon">❌</div>
-        <div class="stat-content">
-          <div class="stat-value">{{ statistics.offline_docks }}</div>
-          <div class="stat-label">离线机场</div>
-        </div>
-      </div>
-      <div class="stat-card alarm">
-        <div class="stat-icon">⚠️</div>
-        <div class="stat-content">
-          <div class="stat-value">{{ statistics.alarm_docks }}</div>
-          <div class="stat-label">告警机场</div>
-        </div>
       </div>
     </div>
 
@@ -454,17 +445,71 @@ export default {
 
 .panel-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.status-summary {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(30, 41, 59, 0.6);
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.summary-item.online {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.summary-item.offline {
+  background: rgba(249, 115, 22, 0.1);
+  border-color: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+}
+
+.summary-item.alarm {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.summary-icon {
+  font-size: 14px;
+}
+
+.summary-label {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.summary-value {
+  font-weight: 700;
+  font-size: 14px;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: 16px;
+  margin-left: auto;
 }
 
 .btn-refresh {
@@ -507,76 +552,7 @@ export default {
   color: #94a3b8;
 }
 
-/* 统计卡片 */
-.statistics-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  color: #f1f5f9;
-  padding: 20px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-  transition: all 0.3s ease;
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(56, 189, 248, 0.2);
-}
-
-.stat-card.online {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.3);
-}
-
-.stat-card.online:hover {
-  box-shadow: 0 6px 12px rgba(34, 197, 94, 0.2);
-}
-
-.stat-card.offline {
-  background: rgba(249, 115, 22, 0.1);
-  border-color: rgba(249, 115, 22, 0.3);
-}
-
-.stat-card.offline:hover {
-  box-shadow: 0 6px 12px rgba(249, 115, 22, 0.2);
-}
-
-.stat-card.alarm {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.3);
-}
-
-.stat-card.alarm:hover {
-  box-shadow: 0 6px 12px rgba(239, 68, 68, 0.2);
-}
-
-.stat-icon {
-  font-size: 32px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
-  margin-bottom: 4px;
-  color: #f1f5f9;
-}
-
-.stat-label {
-  font-size: 13px;
-  color: #cbd5e1;
-}
+/* 统计卡片样式已移除 */
 
 /* 机场卡片列表 */
 .docks-list {

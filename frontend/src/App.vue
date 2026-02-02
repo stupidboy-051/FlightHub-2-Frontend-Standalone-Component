@@ -96,6 +96,7 @@
               to="/dock-monitor"
               class="nav-item"
               :class="{ active: $route.path === '/dock-monitor' }"
+              style="display: none"
           >
             <span class="nav-icon">🏭</span>
             <span class="nav-label">机场监控</span>
@@ -103,14 +104,14 @@
 
           <router-link
               v-if="isAdmin"
-              to="/user-management"
+              to="/system-management"
               class="nav-item"
-              :class="{ active: $route.path === '/user-management' }"
+              :class="{ active: $route.path === '/system-management' }"
           >
             <span class="nav-icon">
-              <img :src="userManagementIcon" class="nav-icon-img" alt="人员管理" />
+              <img :src="userManagementIcon" class="nav-icon-img" alt="系统管理" />
             </span>
-            <span class="nav-label">人员管理</span>
+            <span class="nav-label">系统管理</span>
           </router-link>
 
         </nav>

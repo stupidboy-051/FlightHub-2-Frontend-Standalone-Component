@@ -17,27 +17,41 @@
       </div>
       <div class="header-stats">
         <div class="filter-group">
+          <label class="filter-label" for="type-select">检测类型</label>
+          <select
+            id="type-select"
+            class="wayline-select"
+            v-model="selectedType"
+            @change="handleFilterChange"
+          >
+            <option value="">全部类型</option>
+            <option v-for="item in detectionTypes" :key="item.code" :value="item.code">
+              {{ item.name }}
+            </option>
+          </select>
+        </div>
+        <div class="filter-group">
           <label class="filter-label" for="wayline-select">航线</label>
           <select
             id="wayline-select"
             class="wayline-select"
             v-model="selectedWayline"
-            @change="handleWaylineChange"
+            @change="handleFilterChange"
             :disabled="loadingWaylines"
           >
             <option value="">全部航线</option>
-            <option v-for="item in waylines" :key="item.optionValue" :value="item.optionValue">
+            <option v-for="item in filteredWaylines" :key="item.optionValue" :value="item.optionValue">
               {{ item.name || ('航线 ' + item.optionValue) }}
             </option>
           </select>
         </div>
         <div class="stat-chip">
-          <span class="stat-label">检测中</span>
-          <span class="stat-value">{{ processingCount }}</span>
+          <span class="stat-label">检测中(任务)</span>
+          <span class="stat-value">{{ taskProcessingCount }}</span>
         </div>
         <div class="stat-chip">
-          <span class="stat-label">已识别</span>
-          <span class="stat-value">{{ recognizedCount }}</span>
+          <span class="stat-label">已完成(任务)</span>
+          <span class="stat-value">{{ taskCompletedCount }}</span>
         </div>
       </div>
     </div>
@@ -347,7 +361,8 @@ import alarmApi from '../api/alarmApi'
 import waylineApi from '../api/waylineApi'
 import waylineImageApi from '../api/waylineImageApi'
 import inspectTaskApi from '../api/inspectTaskApi'
-import { ElMessage, ElNotification } from 'element-plus'
+import suspiciousImageApi from '../api/suspiciousImageApi'
+import { ElMessage, ElNotification, ElMessageBox } from 'element-plus'
 
 export default {
   name: 'CarouselDetection',
@@ -361,6 +376,7 @@ export default {
       locationTree: [],
       expandedLocations: new Set(),
       expandedTypes: new Set(),
+      selectedType: '',
       selectedWayline: '',
       flowSlides: [],
       marqueeItems: [],
@@ -409,12 +425,14 @@ export default {
       selectedHistoryTask: null,
       latestManualTaskId: null,
       taskProgressMap: {}, // 记录每个任务的播放进度
-      imageLoadError: false // 图片加载失败状态
+      imageLoadError: false, // 图片加载失败状态
+      useFallbackImage: false // 是否使用降级图片（原图）
     }
   },
   watch: {
     currentInspectImage() {
       this.imageLoadError = false
+      this.useFallbackImage = false
     }
   },
   computed: {
@@ -426,6 +444,65 @@ export default {
     },
     recognizedCount() {
       return this.flowSlides.filter(item => item.state === 'done').length
+    },
+    // 获取所有检测类型
+    detectionTypes() {
+      return this.detectionTree.map(item => ({
+        code: item.code,
+        name: item.name
+      }))
+    },
+    // 根据选中的检测类型筛选航线列表
+    filteredWaylines() {
+      if (!this.selectedType) {
+        return this.waylines
+      }
+      
+      const typeNode = this.detectionTree.find(node => node.code === this.selectedType)
+      if (!typeNode) return []
+      
+      // 提取该类型下的所有航线ID
+      const typeWaylineIds = new Set(typeNode.waylines.map(w => w.id))
+      
+      return this.waylines.filter(w => typeWaylineIds.has(w.id))
+    },
+    // 统计当前筛选条件下的所有任务
+    filteredTasks() {
+      let tasks = []
+      
+      // 遍历检测类型树
+      this.detectionTree.forEach(typeNode => {
+        // 如果选中了类型且不匹配，则跳过
+        if (this.selectedType && typeNode.code !== this.selectedType) {
+          return
+        }
+        
+        typeNode.waylines.forEach(wayline => {
+          // 如果选中了航线且不匹配，则跳过
+          // 注意：selectedWayline 存储的是 optionValue (id)
+          if (this.selectedWayline && wayline.id !== this.selectedWayline) {
+            return
+          }
+          
+          if (wayline.tasks && wayline.tasks.length) {
+            tasks = tasks.concat(wayline.tasks)
+          }
+        })
+      })
+      
+      return tasks
+    },
+    // 统计检测中的任务数 (pending, scanning, processing)
+    taskProcessingCount() {
+      return this.filteredTasks.filter(task => 
+        ['pending', 'scanning', 'processing'].includes(task.detect_status)
+      ).length
+    },
+    // 统计已完成的任务数 (done)
+    taskCompletedCount() {
+      return this.filteredTasks.filter(task => 
+        task.detect_status === 'done'
+      ).length
     },
     marqueeStyle() {
       const offset = this.marqueeIndex * this.marqueeStep
@@ -857,9 +934,30 @@ export default {
       try {
         const res = await inspectTaskApi.getTaskImages(this.currentInspectTaskId)
         const list = this.normalizeList(res)
-        console.log('📸 [Debug] 巡检图片数据:', list.length > 0 ? list[0] : '无数据')
-        console.log('📸 [Debug] 完整图片列表字段:', list.map(img => Object.keys(img)))
-        this.inspectImages = list
+        
+        // 智能更新逻辑：复用现有对象，防止 URL 变更导致请求取消
+        if (this.inspectImages.length > 0) {
+          const currentMap = new Map(this.inspectImages.map(img => [img.id, img]))
+          
+          this.inspectImages = list.map(newImg => {
+            const oldImg = currentMap.get(newImg.id)
+            if (oldImg) {
+              // 更新状态和信息
+              if (oldImg.status01 !== newImg.status01) oldImg.status01 = newImg.status01
+              if (oldImg.result_info !== newImg.result_info) oldImg.result_info = newImg.result_info
+              
+              // 如果 URL 已存在，不要更新，以防止重新加载/取消请求
+              if (!oldImg.signed_url && newImg.signed_url) oldImg.signed_url = newImg.signed_url
+              if (!oldImg.result_signed_url && newImg.result_signed_url) oldImg.result_signed_url = newImg.result_signed_url
+              
+              return oldImg
+            }
+            return newImg
+          })
+        } else {
+          this.inspectImages = list
+        }
+
         if (this.inspectIndex >= this.inspectImages.length) {
           this.inspectIndex = Math.max(this.inspectImages.length - 1, 0)
         }
@@ -960,7 +1058,18 @@ export default {
       this.allTasksCompleted = false // 重置完成标志
       await this.startInspectPlaybackForFolder(taskOrName)
     },
-    handleWaylineChange() {
+    handleFilterChange() {
+      // 如果切换了类型，且当前选中的航线不在新类型的航线列表中，重置航线选择
+      if (this.selectedType && this.selectedWayline) {
+        const typeNode = this.detectionTree.find(node => node.code === this.selectedType)
+        if (typeNode) {
+          const hasWayline = typeNode.waylines.some(w => w.id === this.selectedWayline)
+          if (!hasWayline) {
+            this.selectedWayline = ''
+          }
+        }
+      }
+
       this.activeIndex = 0
       this.stopAuto()
       this.refreshAll()
@@ -1092,6 +1201,7 @@ export default {
     },
     getInspectImageUrl(image) {
       if (!image) return null
+      if (this.useFallbackImage) return image.signed_url
       // 优先使用标注后的图片（result_signed_url），其次是原图（signed_url）
       return image.result_signed_url || image.signed_url || null
     },
@@ -1747,7 +1857,43 @@ export default {
       return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
     },
     handleImageError() {
+      if (!this.useFallbackImage && this.currentInspectImage?.result_signed_url && this.currentInspectImage?.signed_url) {
+        this.useFallbackImage = true
+        return
+      }
       this.imageLoadError = true
+    },
+
+    // 误报反馈
+    async reportSuspicious(image) {
+      if (!image) return
+      
+      try {
+        await ElMessageBox.prompt('请输入误报说明（选填）', '误报反馈确认', {
+          confirmButtonText: '确认上报',
+          cancelButtonText: '取消',
+          inputPlaceholder: '例如：此处并非异常，识别有误',
+          inputType: 'textarea'
+        }).then(async ({ value }) => {
+          const data = {
+            inspect_image_id: image.id,
+            image_url: image.signed_url || image.image_url,
+            image_path: image.image_path || image.image_url, // 补充必填字段 image_path
+            description: value || '用户标记为误报',
+            // 如果需要关联任务信息
+            task_id: this.currentInspectTaskId,
+            source: 'carousel_detection'
+          }
+          
+          await suspiciousImageApi.reportSuspiciousImage(data)
+          ElMessage.success('误报反馈已提交')
+        })
+      } catch (err) {
+        if (err !== 'cancel') {
+          console.error('上报失败:', err)
+          ElMessage.error('上报失败，请稍后重试')
+        }
+      }
     }
   }
 }
@@ -1761,7 +1907,7 @@ export default {
   left: -24px;
   right: -24px;
   background: #0b1224;
-  padding: 12px 24px 0;
+  padding: 40px 24px 0;
   color: #e2e8f0;
   display: flex;
   flex-direction: column;
@@ -1774,8 +1920,6 @@ export default {
   gap: 18px;
   align-items: center;
   margin-bottom: 4px;
-  transform: scale(0.95);
-  transform-origin: left center;
 }
 
 .header-left {
@@ -1801,7 +1945,8 @@ export default {
 }
 
 .header-text h1 {
-  margin: 2px 0;
+  margin: 12px 0;
+  line-height: 1.4;
 }
 
 .eyebrow {
@@ -1809,6 +1954,7 @@ export default {
   letter-spacing: 1px;
   font-size: 12px;
   text-transform: uppercase;
+  margin-bottom: 4px;
 }
 
 .page-title {
@@ -1820,6 +1966,7 @@ export default {
 .page-subtitle {
   color: #94a3b8;
   font-size: 14px;
+  margin-top: 4px;
 }
 
 .scan-card {

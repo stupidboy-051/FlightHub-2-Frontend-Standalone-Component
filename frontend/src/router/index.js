@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // Lazy-loaded route components
 const Login = () => import('../views/Login.vue')
-const UserManagement = () => import('../views/UserManagement.vue')
+const SystemManagement = () => import('../views/SystemManagement.vue')
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
 const CommandCenter = () => import('../views/CommandCenter.vue')
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
@@ -11,7 +11,7 @@ const CarouselDetection = () => import('../views/CarouselDetection.vue')
 const CreateFlightTask = () => import('../views/CreateFlightTask.vue')
 const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
 const MainView = () => import("../views/MainView.vue");
-const DockMonitor = () => import('../views/DockMonitor.vue')
+// const DockMonitor = () => import('../views/DockMonitor.vue')
 //const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
@@ -26,11 +26,11 @@ const routes = [
   },
   
   {
-    path: '/user-management',
-    name: 'UserManagement',
-    component: UserManagement,
+    path: '/system-management',
+    name: 'SystemManagement',
+    component: SystemManagement,
     meta: {
-      title: '\u4eba\u5458\u7ba1\u7406',
+      title: '系统管理',
       requiresAuth: true,
       requiresAdmin: true
     }
@@ -116,15 +116,15 @@ const routes = [
     }
   },
 
-  {
-    path: '/dock-monitor',
-    name: 'DockMonitor',
-    component: DockMonitor,
-    meta: {
-      title: '机场监控',
-      requiresAuth: true
-    }
-  },
+  // {
+  //   path: '/dock-monitor',
+  //   name: 'DockMonitor',
+  //   component: DockMonitor,
+  //   meta: {
+  //     title: '机场监控',
+  //     requiresAuth: true
+  //   }
+  // },
 
   // {
   //   path: '/media-library',
