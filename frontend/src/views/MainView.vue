@@ -4,7 +4,6 @@
       <aside class="side-panel">
         <DashboardCard
           title="机场信息"
-          icon="🏭"
           :more-to="routes.dock"
           :loading="loading.dock"
           :error="errors.dock"
@@ -45,7 +44,6 @@
 
         <DashboardCard
           title="告警管理"
-          icon="🚨"
           :more-to="routes.alarm"
           :loading="loading.alarms"
           :error="errors.alarms"
@@ -70,7 +68,6 @@
 
         <DashboardCard
           title="告警统计"
-          icon="📊"
           :more-to="routes.alarmStats"
           :loading="loading.alarmStats"
           :error="errors.alarmStats"
@@ -125,7 +122,6 @@
           <div class="dashboard-card">
             <div class="card-header">
               <div class="header-main">
-                <span class="card-icon" aria-hidden="true">🛡️</span>
                 <h3 class="card-title">系统安全</h3>
               </div>
             </div>
@@ -165,7 +161,6 @@
           <div class="dashboard-card">
             <div class="card-header">
               <div class="header-main">
-                <span class="card-icon" aria-hidden="true">🛠️</span>
                 <h3 class="card-title">巡检故障处置率</h3>
               </div>
               <div class="header-actions">
@@ -221,7 +216,6 @@
       <aside class="side-panel">
         <DashboardCard
           title="AI检测"
-          icon="🧠"
           :more-to="routes.ai"
           :loading="loading.ai"
           :error="errors.ai"
@@ -249,7 +243,6 @@
 
         <DashboardCard
           title="巡检任务"
-          icon="📋"
           :more-to="routes.tasks"
           :loading="loading.tasks"
           :error="errors.tasks"
@@ -276,7 +269,6 @@
 
         <DashboardCard
           title="飞行统计"
-          icon="✈️"
           :loading="loading.flightStats"
           :error="errors.flightStats"
           :is-empty="!flightStats.byAirport || flightStats.byAirport.length === 0"

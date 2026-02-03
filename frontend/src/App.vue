@@ -76,6 +76,7 @@
               to="/create-flight-task"
               class="nav-item"
               :class="{ active: $route.path === '/create-flight-task' }"
+              style="display: none"
           >
             <span class="nav-icon">➕</span>
             <span class="nav-label">创建任务</span>
