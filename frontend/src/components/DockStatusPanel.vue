@@ -113,11 +113,11 @@
               </div>
             </div>
 
-            <div class="info-item" v-if="dock.drone_battery_percent">
+            <div class="info-item">
               <span class="info-icon">🔋</span>
               <div class="info-content">
                 <span class="info-label">无人机电量</span>
-                <span class="info-value">{{ dock.drone_battery_percent }}%</span>
+                <span class="info-value">{{ getDroneBatteryText(dock) }}</span>
               </div>
             </div>
 
@@ -284,7 +284,7 @@
               </div>
               <div class="detail-item">
                 <span class="detail-label">电池电量:</span>
-                <span class="detail-value">{{ selectedDock.drone_battery_percent }}%</span>
+                <span class="detail-value">{{ getDroneBatteryText(selectedDock) }}</span>
               </div>
             </div>
           </div>
@@ -403,6 +403,18 @@ export default {
         null: '--'
       }
       return stateMap[state] || '未知'
+    },
+    isDroneOutOfDock(dock) {
+      return dock?.drone_in_dock === 0 || dock?.drone_in_dock === '0'
+    },
+    formatBatteryPercent(value) {
+      if (value === null || value === undefined || value === '') return '--'
+      const numeric = Number(value)
+      return Number.isFinite(numeric) ? `${numeric}%` : '--'
+    },
+    getDroneBatteryText(dock) {
+      if (this.isDroneOutOfDock(dock)) return '--'
+      return this.formatBatteryPercent(dock?.drone_battery_percent)
     },
 
     formatTime(timeStr) {

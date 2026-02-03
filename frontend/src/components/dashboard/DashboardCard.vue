@@ -1,9 +1,13 @@
 <template>
   <div class="dashboard-card">
-    <div class="card-header">
+    <div class="card-header" :class="{ 'has-more': moreTo }">
       <div class="header-main">
         <span v-if="icon" class="card-icon" aria-hidden="true">{{ icon }}</span>
         <h3 class="card-title">{{ title }}</h3>
+      </div>
+
+      <div v-if="$slots['header-extra']" class="header-extra">
+        <slot name="header-extra" />
       </div>
 
       <router-link v-if="moreTo" :to="moreTo" class="more-btn">
@@ -63,6 +67,7 @@ export default {
   flex-direction: column;
   overflow: visible;
   height: 100%;
+  min-width: 0;
   transition: all 0.3s ease;
 }
 
@@ -92,6 +97,7 @@ export default {
   background: linear-gradient(to bottom, rgba(0, 110, 255, 0.25), transparent);
   border-bottom: 1px solid rgba(0, 191, 255, 0.15);
   min-height: 48px;
+  min-width: 0;
 }
 
 .header-main {
@@ -99,6 +105,21 @@ export default {
   align-items: center;
   gap: 8px;
   max-width: 60%;
+  min-width: 0;
+}
+
+.header-extra {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-header.has-more .header-extra {
+  right: 94px;
 }
 
 .more-btn {
@@ -138,6 +159,10 @@ export default {
   font-weight: bold;
   letter-spacing: 2px;
   text-shadow: 0 0 10px rgba(0, 191, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .arrow {
@@ -156,6 +181,7 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .body-inner-container {
@@ -163,8 +189,10 @@ export default {
   border: 1px solid rgba(0, 191, 255, 0.15);
   padding: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
   background: rgba(0, 0, 0, 0.1);
+  min-width: 0;
 }
 
 .body-inner-container::-webkit-scrollbar {

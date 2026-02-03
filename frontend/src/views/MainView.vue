@@ -34,7 +34,9 @@
                 </div>
                 <div class="info-row">
                   <span class="label">🔋 剩余电量</span>
-                  <span class="value">{{ formatBatteryPercent(item.drone_battery_percent) }}</span>
+                  <span class="value">
+                    {{ isDroneWorking(item) ? '--' : formatBatteryPercent(item.drone_battery_percent) }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -72,26 +74,34 @@
           :more-to="routes.alarmStats"
           :loading="loading.alarmStats"
           :error="errors.alarmStats"
-          :is-empty="!alertDetectTypeStats || alertDetectTypeStats.total === 0"
+          :is-empty="!alarmMonthlyStats || alarmMonthlyStats.total === 0"
           empty-text="暂无统计"
         >
           <div class="stats-wrap">
-            <div class="stats-total">
-              <span class="stats-label">近12个月告警</span>
-              <span class="stats-value">{{ (alertDetectTypeStats && alertDetectTypeStats.total) || 0 }}</span>
+            <div class="range-toggle">
+              <button
+                v-for="opt in rangeOptions"
+                :key="opt.value"
+                type="button"
+                class="range-btn"
+                :class="{ active: alertRange === opt.value }"
+                @click="setRange('alert', opt.value)"
+              >
+                {{ opt.label }}
+              </button>
             </div>
-            <div v-if="alertDetectTypeStats && alertDetectTypeStats.total > 0" class="donut-mini-content">
+            <div v-if="alarmMonthlyStats && alarmMonthlyStats.total > 0" class="donut-mini-content">
               <DonutRing
-                :series="alertDetectTypeStats.series"
-                total-label="总异常"
-                :total-value="alertDetectTypeStats.total"
+                :series="alarmMonthlyStats.series"
+                total-label="报警总数"
+                :total-value="alarmMonthlyStats.total"
               />
               <div class="donut-mini-legend">
-                <div v-for="item in alertDetectTypeStats.series" :key="item.id" class="legend-item">
+                <div v-for="item in alarmMonthlyStats.series" :key="item.id" class="legend-item">
                   <span class="legend-dot" :style="{ background: item.color }"></span>
                   <div class="legend-text">
                     <span class="legend-name" :title="item.name">{{ item.name }}</span>
-                    <span class="legend-value">{{ donutPercent(item.value) }}%</span>
+                    <span class="legend-value">{{ donutPercent(item.value, alarmMonthlyStats.total) }}%</span>
                   </div>
                 </div>
               </div>
@@ -124,27 +134,29 @@
               <div class="corner top-right"></div>
               <div class="corner bottom-left"></div>
               <div class="corner bottom-right"></div>
-              <div class="hero-content">
-                <div class="hero-header">
-                  <div>
-                    <p class="hero-label">安全运行天数</p>
-                    <div class="hero-number">
-                      {{ safetyStats.safetyDays }}
-                      <span class="hero-unit">天</span>
+              <div class="card-scroll">
+                <div class="hero-content">
+                  <div class="hero-header">
+                    <div>
+                      <p class="hero-label">安全运行天数</p>
+                      <div class="hero-number">
+                        {{ safetyStats.safetyDays }}
+                        <span class="hero-unit">天</span>
+                      </div>
+                    </div>
+                    <span class="hero-tag">本年度</span>
+                  </div>
+                  <div class="hero-summary">
+                    <div v-for="s in safetyStatuses" :key="s.label" class="summary-chip">
+                      <span class="chip-dot" :style="{ background: s.color }"></span>
+                      <span class="chip-label">{{ s.label }}</span>
+                      <span class="chip-value">{{ s.value }}</span>
                     </div>
                   </div>
-                  <span class="hero-tag">本年度</span>
-                </div>
-                <div class="hero-summary">
-                  <div v-for="s in safetyStatuses" :key="s.label" class="summary-chip">
-                    <span class="chip-dot" :style="{ background: s.color }"></span>
-                    <span class="chip-label">{{ s.label }}</span>
-                    <span class="chip-value">{{ s.value }}</span>
+                  <div class="hero-foot">
+                    <span class="foot-label">最近告警时间</span>
+                    <span class="foot-value">{{ safetyLastUpdated }}</span>
                   </div>
-                </div>
-                <div class="hero-foot">
-                  <span class="foot-label">最近告警时间</span>
-                  <span class="foot-value">{{ safetyLastUpdated }}</span>
                 </div>
               </div>
             </div>
@@ -153,8 +165,19 @@
           <div class="dashboard-card">
             <div class="card-header">
               <div class="header-main">
-                <span class="card-icon" aria-hidden="true">🎞️</span>
-                <h3 class="card-title">航迹回放</h3>
+                <span class="card-icon" aria-hidden="true">🛠️</span>
+                <h3 class="card-title">巡检故障处置率</h3>
+              </div>
+              <div class="header-actions">
+                <select
+                  class="range-select"
+                  :value="handleRateRange"
+                  @change="setRange('handle', $event.target.value)"
+                >
+                  <option v-for="opt in rangeOptions" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
               </div>
             </div>
             <div class="card-body">
@@ -162,11 +185,33 @@
               <div class="corner top-right"></div>
               <div class="corner bottom-left"></div>
               <div class="corner bottom-right"></div>
-              <div class="playback-content">
-                <div class="playback-ui">
-                  <button class="btn-play-large" aria-label="播放" />
+              <div class="card-scroll">
+              <div v-if="loading.handleRate" class="state-block">
+                <div class="loading-spinner"></div>
+                <div class="state-text">加载中...</div>
+              </div>
+              <div v-else-if="errors.handleRate" class="state-block error">
+                <div class="state-text">{{ errors.handleRate }}</div>
+              </div>
+                <div v-else-if="!alarmHandleRateStats || alarmHandleRateStats.total === 0" class="state-block">
+                  <div class="state-text">暂无统计</div>
                 </div>
-                <div class="time-stamp-v2">{{ nowStamp }}</div>
+                <div v-else class="rate-content">
+                  <div class="rate-header">
+                    <span class="rate-title">{{ handleRateLabel }}</span>
+                    <span class="rate-sub">统计至 {{ nowStamp }}</span>
+                  </div>
+                  <div class="rate-list">
+                    <div v-for="item in alarmHandleRateStats.series" :key="item.id" class="rate-item">
+                      <div class="rate-name">{{ item.name }}</div>
+                      <div class="rate-bar">
+                        <div class="rate-bar-fill" :style="{ width: `${item.rate}%`, background: item.color }"></div>
+                      </div>
+                      <div class="rate-value">{{ item.rate }}%</div>
+                      <div class="rate-count">{{ item.handled }}/{{ item.total }}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -230,27 +275,37 @@
         </DashboardCard>
 
         <DashboardCard
-          title="人员管理"
-          icon="👥"
-          :more-to="routes.users"
-          :loading="loading.users"
-          :error="errors.users"
-          :is-empty="personnel.users.length === 0"
-          empty-text="暂无人员信息"
+          title="飞行统计"
+          icon="✈️"
+          :loading="loading.flightStats"
+          :error="errors.flightStats"
+          :is-empty="!flightStats.byAirport || flightStats.byAirport.length === 0"
+          empty-text="暂无机场任务"
         >
-           <div class="personnel">
-            <div class="table-container">
-              <div class="table-header">
-                <span class="th-box">用户名</span>
-                <span class="th-box">姓名</span>
-                <span class="th-box">角色</span>
+          <template #header-extra>
+            <select
+              class="range-select"
+              :value="flightRange"
+              @change="setRange('flight', $event.target.value)"
+            >
+              <option v-for="opt in rangeOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </template>
+          <div class="flight-stats">
+            <div class="airport-table">
+              <div class="airport-header">
+                <span class="airport-col">机场</span>
+                <span class="airport-col">任务</span>
+                <span class="airport-col">里程</span>
+                <span class="airport-col">时长</span>
               </div>
-              <div class="table-content">
-                <div v-for="u in personnel.users" :key="u.id || u.username" class="table-row">
-                  <span class="col">{{ u.username }}</span>
-                  <span class="col">{{ u.name }}</span>
-                  <span class="col">{{ u.role }}</span>
-                </div>
+              <div v-for="item in flightStats.byAirport" :key="item.dockSn || item.name" class="airport-row">
+                <span class="airport-col">{{ item.name }}</span>
+                <span class="airport-col">{{ item.taskCount || 0 }} 次</span>
+                <span class="airport-col">{{ formatMetric(item.distanceKm, '公里') }}</span>
+                <span class="airport-col">{{ formatMetric(item.durationHours, '小时') }}</span>
               </div>
             </div>
           </div>
@@ -269,6 +324,13 @@ import dockStatusApi from "@/api/dockStatusApi";
 // 🔥 1. 引入 Cesium
 import * as Cesium from 'cesium';
 
+
+const RANGE_OPTIONS = [
+  { label: '近1个月', value: 'month', days: 30 },
+  { label: '近1季度', value: 'quarter', days: 90 },
+  { label: '近1年', value: 'year', days: 365 }
+]
+
 export default {
   name: 'MainView',
   components: {
@@ -282,37 +344,49 @@ export default {
         alarm: '/alarm-management',
         alarmStats: '/alarm-stats',
         ai: '/carousel-detection',
-        tasks: '/inspect-task-management',
-        users: '/user-management'
+        tasks: '/inspect-task-management'
       },
       loading: {
         dock: true,
         alarms: true,
         alarmStats: true,
+        handleRate: true,
         ai: true,
         tasks: true,
-        users: true,
+        flightStats: true,
         safety: true
       },
       errors: {
         dock: '',
         alarms: '',
         alarmStats: '',
+        handleRate: '',
         ai: '',
         tasks: '',
-        users: '',
+        flightStats: '',
         safety: ''
       },
+      rangeOptions: RANGE_OPTIONS,
+      alertRange: 'month',
+      handleRateRange: 'month',
+      flightRange: 'month',
+
       dockSummary: null,
       docks: [],
       recentAlarms: [],
-      alertWaylineStats: null,
-      alertDetectTypeStats: null,
+      alarmMonthlyStats: null,
+      alarmHandleRateStats: null,
       aiSlides: [],
       aiIndex: 0,
       aiTimer: null,
       recentTasks: [],
-      personnel: { isAdmin: false, total: 0, users: [] },
+      flightStats: {
+        totalTasks: 0,
+        byAirport: [],
+        distanceKm: null,
+        durationHours: null,
+        window: null
+      },
       safetyStats: { safetyDays: 0, todayAlarms: 0, monthAlarms: 0, yearAlarms: 0, latestAlarmAt: null },
       nowStampTimer: null,
       nowStamp: '',
@@ -340,6 +414,18 @@ export default {
     },
     currentAiSlide() {
       return this.aiSlides[this.aiIndex] || null
+    },
+    alertRangeLabel() {
+      const label = this.getRangeLabel(this.alertRange)
+      return label ? `${label}报警数` : '报警数'
+    },
+    handleRateLabel() {
+      const label = this.getRangeLabel(this.handleRateRange)
+      return label ? `${label}处置率` : '处置率'
+    },
+    flightRangeLabel() {
+      const label = this.getRangeLabel(this.flightRange)
+      return label ? `统计周期：${label}` : ''
     }
   },
   mounted() {
@@ -695,14 +781,15 @@ initCesiumMap() {
 
         this.dockEntities = entities
       },
-      async loadAll() {
+    async loadAll() {
       await Promise.all([
         this.loadDock(),
         this.loadRecentAlarms(),
         this.loadAlertStats(),
+        this.loadHandleRateStats(),
         this.loadAiSlides(),
         this.loadTasks(),
-        this.loadUsers(),
+        this.loadFlightStats(),
         this.loadSafety()
       ])
       this.startAiAuto()
@@ -752,15 +839,29 @@ initCesiumMap() {
       this.loading.alarmStats = true
       this.errors.alarmStats = ''
       try {
-        this.alertWaylineStats = await homeDashboardApi.getAlertWaylineStats({ months: 12, topN: 6 })
-        console.log(this.alertWaylineStats)
-        this.alertDetectTypeStats = await homeDashboardApi.getDetectTypeStats()
-        console.log(this.alertDetectTypeStats)
+        const monthlyStats = await homeDashboardApi.getDetectTypeStatsByRange({
+          days: this.rangeToDays(this.alertRange)
+        })
+        this.alarmMonthlyStats = monthlyStats
       } catch (e) {
-        this.alertWaylineStats = null
+        this.alarmMonthlyStats = null
         this.errors.alarmStats = this.getErrMsg(e, '加载告警统计失败')
       } finally {
         this.loading.alarmStats = false
+      }
+    },
+    async loadHandleRateStats() {
+      this.loading.handleRate = true
+      this.errors.handleRate = ''
+      try {
+        this.alarmHandleRateStats = await homeDashboardApi.getAlarmHandleRateStatsByRange({
+          days: this.rangeToDays(this.handleRateRange)
+        })
+      } catch (e) {
+        this.alarmHandleRateStats = null
+        this.errors.handleRate = this.getErrMsg(e, '加载处置率统计失败')
+      } finally {
+        this.loading.handleRate = false
       }
     },
     async loadAiSlides() {
@@ -789,16 +890,22 @@ initCesiumMap() {
         this.loading.tasks = false
       }
     },
-    async loadUsers() {
-      this.loading.users = true
-      this.errors.users = ''
+    async loadFlightStats() {
+      this.loading.flightStats = true
+      this.errors.flightStats = ''
       try {
-        this.personnel = await homeDashboardApi.getPersonnelSummary(5)
+        this.flightStats = await homeDashboardApi.getFlightStatsByRange({ days: this.rangeToDays(this.flightRange) })
       } catch (e) {
-        this.personnel = { isAdmin: false, total: 0, users: [] }
-        this.errors.users = this.getErrMsg(e, '加载人员信息失败')
+        this.flightStats = {
+          totalTasks: 0,
+          byAirport: [],
+          distanceKm: null,
+          durationHours: null,
+          window: null
+        }
+        this.errors.flightStats = this.getErrMsg(e, '加载飞行统计失败')
       } finally {
-        this.loading.users = false
+        this.loading.flightStats = false
       }
     },
     async loadSafety() {
@@ -833,6 +940,43 @@ initCesiumMap() {
     },
     formatWindSpeed(speed) {
       return speed !== null && speed !== undefined ? `${speed} m/s` : '--'
+    },
+    formatMetric(value, unit) {
+      if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) {
+        return unit ? `--${unit}` : '--'
+      }
+      const numeric = Number(value)
+      const display = Number.isFinite(numeric) ? numeric : value
+      return unit ? `${display}${unit}` : String(display)
+    },
+    getRangeLabel(range) {
+      const opt = this.rangeOptions.find(item => item.value === range)
+      return opt ? opt.label : ''
+    },
+    rangeToDays(range) {
+      const opt = this.rangeOptions.find(item => item.value === range)
+      return opt ? opt.days : 30
+    },
+    setRange(type, value) {
+      const keyMap = {
+        alert: 'alertRange',
+        handle: 'handleRateRange',
+        flight: 'flightRange'
+      }
+      const key = keyMap[type] || `${type}Range`
+      if (this[key] === value) return
+      this[key] = value
+      if (type === 'alert' || type === 'handle') {
+        if (type === 'alert') {
+          this.loadAlertStats()
+          return
+        }
+        this.loadHandleRateStats()
+        return
+      }
+      if (type === 'flight') {
+        this.loadFlightStats()
+      }
     },
     getStatusText(status) {
       const statusMap = {
@@ -880,10 +1024,10 @@ initCesiumMap() {
       if (!this.aiSlides.length) return
       this.aiIndex = (this.aiIndex - 1 + this.aiSlides.length) % this.aiSlides.length
     },
-    donutPercent(value) {
-      const total = Number(this.alertWaylineStats?.total || 0)
-      if (!total) return 0
-      return Math.round((Number(value || 0) / total) * 100)
+    donutPercent(value, total) {
+      const safeTotal = Number(total || 0)
+      if (!safeTotal) return 0
+      return Math.round((Number(value || 0) / safeTotal) * 100)
     },
     handleAiImgError(event) {
       try {
@@ -953,6 +1097,10 @@ initCesiumMap() {
   gap: 18px;
   min-height: 0;
   height: 100%;
+}
+
+.center-stage > * {
+  min-height: 0;
 }
 
 /* 🔥 地图区域样式修正 */
@@ -1040,7 +1188,7 @@ initCesiumMap() {
   position: relative;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
   height: 100%;
   transition: all 0.3s ease;
 }
@@ -1080,12 +1228,46 @@ initCesiumMap() {
   max-width: 60%;
 }
 
+.header-actions {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-select {
+  min-width: 88px;
+  background: rgba(0, 162, 255, 0.12);
+  border: 1px solid rgba(0, 191, 255, 0.45);
+  color: #e0f2fe;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+.range-select option {
+  background: #0b1d3a;
+  color: #e2e8f0;
+}
+
 .card-body {
   flex: 1;
   padding: 10px;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.card-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .bottom-media {
@@ -1093,6 +1275,14 @@ initCesiumMap() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
+  height: 100%;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.bottom-media > .dashboard-card {
+  height: 100%;
+  min-height: 0;
 }
 .glass-card {
   background: rgba(30, 41, 59, 0.45);
@@ -1248,6 +1438,205 @@ initCesiumMap() {
   color: #94a3b8;
   font-size: 12px;
 }
+
+.state-block {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #aaddff;
+}
+.state-block.error {
+  color: #ff6b6b;
+}
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(0, 191, 255, 0.2);
+  border-top-color: #00bfff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+.state-text {
+  font-size: 13px;
+  opacity: 0.8;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.rate-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.rate-title {
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 800;
+}
+.rate-sub {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.rate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rate-item {
+  display: grid;
+  grid-template-columns: 70px 1fr 52px;
+  grid-template-rows: auto auto;
+  gap: 6px 10px;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.rate-name {
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 700;
+}
+.rate-bar {
+  height: 6px;
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.rate-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+.rate-value {
+  color: #e0f2fe;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+.rate-count {
+  grid-column: 2 / -1;
+  color: #94a3b8;
+  font-size: 11px;
+}
+.flight-range-note {
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: right;
+}
+.airport-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.airport-header,
+.airport-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 0.8fr 0.8fr;
+  gap: 8px;
+  align-items: center;
+}
+.airport-header {
+  padding: 6px 8px;
+  background: rgba(0, 162, 255, 0.2);
+  border: 1px solid rgba(0, 191, 255, 0.4);
+  border-radius: 10px;
+  color: #aaddff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.airport-row {
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: #e2e8f0;
+  font-size: 12px;
+}
+.airport-col {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+.flight-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.flight-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.metric {
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.metric-label {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.metric-value {
+  color: #e0f2fe;
+  font-size: 16px;
+  font-weight: 800;
+}
+.flight-airports {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.airports-title {
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 700;
+}
+.airport-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.airport-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.airport-name {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+}
+.airport-count {
+  color: #e0f2fe;
+  font-size: 12px;
+  font-weight: 800;
+}
+.airports-empty {
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+  padding: 10px 0;
+}
 .pill {
   display: inline-block;
   padding: 2px 12px;
@@ -1266,6 +1655,32 @@ initCesiumMap() {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.range-toggle {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.range-btn {
+  border: 1px solid rgba(0, 191, 255, 0.3);
+  background: rgba(0, 191, 255, 0.08);
+  color: #aaddff;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.range-btn:hover {
+  border-color: rgba(0, 191, 255, 0.6);
+  color: #ffffff;
+}
+.range-btn.active {
+  background: rgba(0, 191, 255, 0.25);
+  border-color: rgba(0, 191, 255, 0.8);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(0, 191, 255, 0.3);
 }
 .stats-total {
   display: flex;

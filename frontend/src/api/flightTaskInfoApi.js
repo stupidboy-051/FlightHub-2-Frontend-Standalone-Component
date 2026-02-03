@@ -28,6 +28,14 @@ api.interceptors.response.use(
 )
 
 export default {
+  async getFlightTaskInfos(params = {}) {
+    try {
+      return await api.get('/flight-task-info/', { params })
+    } catch (error) {
+      console.error('Failed to fetch flight task infos:', error)
+      throw error
+    }
+  },
   async getLatestBySn(sn) {
     if (!sn) return {}
     try {
