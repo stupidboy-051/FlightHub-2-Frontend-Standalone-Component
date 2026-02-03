@@ -352,9 +352,21 @@ export default {
       if (!this.categoryFilter) {
         return this.waylines
       }
-      return this.waylines.filter(wayline => 
-        (wayline.detect_type || '').toLowerCase() === this.categoryFilter.toLowerCase()
-      )
+      
+      const filter = this.categoryFilter.toLowerCase()
+      const variantsMap = {
+        'rail': ['rail', 'track'],
+        'contactline': ['contactline', 'catenary', 'overhead', 'insulator', 'pole'],
+        'bridge': ['bridge'],
+        'protected_area': ['protected_area', 'protection_zone', 'protection_area']
+      }
+      
+      const targetVariants = variantsMap[filter] || [filter]
+      
+      return this.waylines.filter(wayline => {
+        const type = (wayline.detect_type || '').toLowerCase()
+        return targetVariants.some(v => type.includes(v))
+      })
     }
   },
   methods: {
@@ -408,14 +420,34 @@ export default {
     },
     async loadWaylines() {
       try {
-        const response = await waylineApi.getWaylines({ page_size: 100 })
-        console.log('📋 [航线列表] 响应数据:', response)
-        // 🔥 修复：后端禁用了分页，直接返回数组，而不是 {results: [...]}
-        this.waylines = Array.isArray(response) ? response : (response?.results || [])
-        console.log(`📋 [航线列表] 加载了 ${this.waylines.length} 条航线`)
+        let allWaylines = []
+        let page = 1
+        let hasNext = true
+        
+        while (hasNext) {
+          const response = await waylineApi.getWaylines({ page, page_size: 100 })
+          console.log(`📋 [航线列表] 第${page}页数据:`, response)
+          
+          let results = []
+          if (Array.isArray(response)) {
+            results = response
+            hasNext = false // 如果直接返回数组，说明没有分页
+          } else {
+            results = response?.results || []
+            if (!response.next) {
+              hasNext = false
+            } else {
+              page++
+            }
+          }
+          
+          allWaylines = allWaylines.concat(results)
+        }
+        
+        this.waylines = allWaylines
+        console.log(`📋 [航线列表] 共加载了 ${this.waylines.length} 条航线`)
       } catch (error) {
         console.error('❌ [航线列表] 加载失败:', error)
-        // 🔥 新增：显示错误提示
         ElMessage.error('加载航线列表失败')
       }
     },

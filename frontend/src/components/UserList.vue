@@ -144,10 +144,33 @@
           </div>
           <div class="form-group">
             <label class="form-label">角色</label>
-            <select v-model="formData.role" class="form-select">
-              <option value="user">普通用户</option>
-              <option value="admin">管理员</option>
-            </select>
+            <!-- 自定义下拉框 -->
+            <div class="custom-select-wrapper full-width" v-click-outside="() => activeDropdown = ''">
+              <div 
+                class="custom-select-trigger" 
+                @click="activeDropdown = activeDropdown === 'role' ? '' : 'role'" 
+                :class="{ 'is-open': activeDropdown === 'role' }"
+              >
+                <span>{{ formData.role === 'admin' ? '管理员' : '普通用户' }}</span>
+                <span class="arrow-icon">▼</span>
+              </div>
+              <div v-show="activeDropdown === 'role'" class="custom-select-options">
+                <div 
+                  class="option-item" 
+                  :class="{ 'is-selected': formData.role === 'user' }" 
+                  @click="formData.role = 'user'; activeDropdown = ''"
+                >
+                  普通用户
+                </div>
+                <div 
+                  class="option-item" 
+                  :class="{ 'is-selected': formData.role === 'admin' }" 
+                  @click="formData.role = 'admin'; activeDropdown = ''"
+                >
+                  管理员
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -273,6 +296,21 @@ import inspectImageApi from '../api/inspectImageApi'
 
 export default {
   name: 'UserList',
+  directives: {
+    'click-outside': {
+      mounted(el, binding) {
+        el.clickOutsideEvent = function(event) {
+          if (!(el === event.target || el.contains(event.target))) {
+            binding.value(event)
+          }
+        }
+        document.body.addEventListener('click', el.clickOutsideEvent)
+      },
+      unmounted(el) {
+        document.body.removeEventListener('click', el.clickOutsideEvent)
+      }
+    }
+  },
   setup() {
     const store = useStore()
     const userFormRef = ref(null)
@@ -299,6 +337,7 @@ export default {
     const selectedUserId = ref(null)
     const isSubmitting = ref(false)
     const isDeleting = ref(false)
+    const activeDropdown = ref('')
     
     const formData = ref({
       username: '',
@@ -569,6 +608,7 @@ export default {
       selectedUserId,
       isSubmitting,
       isDeleting,
+      activeDropdown,
       formData,
       manualDetectForm,
       exportForm,
@@ -1149,5 +1189,116 @@ export default {
   color: #f59e0b !important;
   font-size: 13px !important;
   margin-top: 8px !important;
+}
+/* 模态框内的自定义下拉框样式 */
+.custom-select-wrapper.full-width {
+  width: 100%;
+}
+
+.custom-select-wrapper {
+  position: relative;
+}
+
+.custom-select-trigger {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(10, 14, 39, 0.6);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+
+.custom-select-trigger:hover,
+.custom-select-trigger.is-open {
+  border-color: #00d4ff;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+  background: rgba(10, 14, 39, 0.8);
+}
+
+.custom-select-trigger span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.arrow-icon {
+  font-size: 10px;
+  color: #64748b;
+  transition: transform 0.3s ease;
+  margin-left: 8px;
+}
+
+.custom-select-trigger.is-open .arrow-icon {
+  transform: rotate(180deg);
+  color: #00d4ff;
+}
+
+.custom-select-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 2100; /* 高于模态框的 2000 */
+  max-height: 240px;
+  overflow-y: auto;
+  animation: dropdownFadeIn 0.2s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.option-item {
+  padding: 10px 14px;
+  color: #cbd5e1;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.option-item:last-child {
+  border-bottom: none;
+}
+
+.option-item:hover {
+  background: rgba(0, 212, 255, 0.1);
+  color: #fff;
+}
+
+.option-item.is-selected {
+  background: rgba(0, 212, 255, 0.15);
+  color: #00d4ff;
+  font-weight: 500;
+}
+
+/* 滚动条美化 */
+.custom-select-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-select-options::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.custom-select-options::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.3);
+  border-radius: 3px;
+}
+
+.custom-select-options::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.5);
 }
 </style>

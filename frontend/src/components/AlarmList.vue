@@ -76,41 +76,37 @@
       <table v-else class="alarm-table">
         <thead>
           <tr>
-            <th width="80">ID</th>
             <th width="150">航线名称</th>
-            <th width="180">时间</th>
-            <th width="120">类型</th>
+            <th width="150" class="text-center">时间</th>
+            <th width="120" class="text-center">类型</th>
             <th>描述</th>
-            <th width="150">位置</th>
-            <th width="100">状态</th>
-            <th width="200">操作</th>
+            <th width="180">位置</th>
+            <th width="100" class="text-center">状态</th>
+            <th width="180" class="text-center">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="filteredAlarms.length === 0">
-            <td colspan="8" class="empty-row">暂无告警数据</td>
+            <td colspan="7" class="empty-row">暂无告警数据</td>
           </tr>
           <tr v-for="alarm in filteredAlarms" :key="alarm.id" class="alarm-row">
-            <td>
-              <span class="id-badge">{{ alarm.id }}</span>
-            </td>
             <td>{{ getWaylineName(alarm) }}</td>
-            <td>
+            <td class="text-center">
               <span class="datetime-text">{{ formatDate(alarm.created_at) }}</span>
             </td>
-            <td>
+            <td class="text-center">
               <span class="category-badge" :class="getCategoryClass(alarm.category_name)">
                 {{ alarm.category_name || '未分类' }}
               </span>
             </td>
             <td class="description-cell">{{ alarm.content }}</td>
             <td>坐标({{ alarm.latitude || '--' }}, {{ alarm.longitude || '--' }})</td>
-            <td>
+            <td class="text-center">
               <span class="status-badge" :class="`status-${alarm.status.toLowerCase()}`">
                 {{ getStatusText(alarm.status) }}
               </span>
             </td>
-            <td>
+            <td class="text-center">
               <div class="action-buttons">
                 <button @click="viewAlarmDetail(alarm)" class="action-btn view-btn">
                   查看
@@ -178,12 +174,47 @@
             </div>
             <div class="form-group">
               <label class="form-label">更新为</label>
-              <select v-model="newAlarmStatus" class="form-select">
-                <option value="PENDING">待处理</option>
-                <option value="PROCESSING">处理中</option>
-                <option value="COMPLETED">已完成</option>
-                <option value="IGNORED">已忽略</option>
-              </select>
+              <!-- 自定义下拉框 -->
+              <div class="custom-select-wrapper full-width" v-click-outside="() => activeDropdown = ''">
+                <div 
+                  class="custom-select-trigger" 
+                  @click="activeDropdown = activeDropdown === 'modalStatus' ? '' : 'modalStatus'" 
+                  :class="{ 'is-open': activeDropdown === 'modalStatus' }"
+                >
+                  <span>{{ getStatusText(newAlarmStatus) || '请选择状态' }}</span>
+                  <span class="arrow-icon">▼</span>
+                </div>
+                <div v-show="activeDropdown === 'modalStatus'" class="custom-select-options">
+                  <div 
+                    class="option-item" 
+                    :class="{ 'is-selected': newAlarmStatus === 'PENDING' }" 
+                    @click="newAlarmStatus = 'PENDING'; activeDropdown = ''"
+                  >
+                    待处理
+                  </div>
+                  <div 
+                    class="option-item" 
+                    :class="{ 'is-selected': newAlarmStatus === 'PROCESSING' }" 
+                    @click="newAlarmStatus = 'PROCESSING'; activeDropdown = ''"
+                  >
+                    处理中
+                  </div>
+                  <div 
+                    class="option-item" 
+                    :class="{ 'is-selected': newAlarmStatus === 'COMPLETED' }" 
+                    @click="newAlarmStatus = 'COMPLETED'; activeDropdown = ''"
+                  >
+                    已完成
+                  </div>
+                  <div 
+                    class="option-item" 
+                    :class="{ 'is-selected': newAlarmStatus === 'IGNORED' }" 
+                    @click="newAlarmStatus = 'IGNORED'; activeDropdown = ''"
+                  >
+                    已忽略
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="modal-footer">
@@ -300,12 +331,39 @@ export default {
   },
   computed: {
     filteredWaylines() {
+      console.log('--- Filtering Debug Start ---')
+      console.log('Total waylines:', this.waylines.length)
+      console.log('Current filter:', this.detectTypeFilter)
+      
       if (!this.detectTypeFilter) {
         return this.waylines
       }
-      return this.waylines.filter(wayline => 
-        (wayline.detect_type || '').toLowerCase() === this.detectTypeFilter.toLowerCase()
-      )
+      
+      const filterKey = this.detectTypeFilter.toLowerCase()
+      
+      const result = this.waylines.filter(wayline => {
+        const type = (wayline.detect_type || '').toLowerCase().trim()
+        
+        // 特殊处理：如果选的是 rail，也要匹配 track
+        if (filterKey === 'rail' && type.includes('track')) return true
+        
+        // 特殊处理：如果选的是 contactline，也要匹配 catenary, overhead 等
+        if (filterKey === 'contactline' && (
+          type.includes('catenary') || 
+          type.includes('overhead') || 
+          type.includes('insulator') || 
+          type.includes('pole')
+        )) return true
+        
+        // 通用处理：包含关键词即可
+        return type.includes(filterKey)
+      })
+      
+      console.log('Filtered result count:', result.length)
+      console.log('Filtered result:', result)
+      console.log('--- Filtering Debug End ---')
+      
+      return result
     }
   },
   methods: {
@@ -393,8 +451,32 @@ export default {
     },
     async loadWaylines() {
       try {
-        const response = await waylineApi.getWaylines()
-        this.waylines = response.results || response
+        let allWaylines = []
+        let page = 1
+        let hasNext = true
+        
+        while (hasNext) {
+          // 尝试获取数据，虽然page_size可能受限，但通过循环获取所有页
+          const response = await waylineApi.getWaylines({ page, page_size: 100 })
+          const results = response.results || response
+          
+          if (Array.isArray(results)) {
+            allWaylines = allWaylines.concat(results)
+            // 检查是否有下一页链接来决定是否继续请求
+            if (!response.next) {
+              hasNext = false
+            } else {
+              page += 1
+            }
+          } else {
+            // 非分页结构，直接就是全量数据
+            allWaylines = results
+            hasNext = false
+          }
+        }
+        
+        this.waylines = allWaylines
+        console.log('Total loaded waylines:', this.waylines.length)
       } catch (error) {
         console.error('加载航线失败:', error)
       }
@@ -659,7 +741,15 @@ export default {
   font-weight: 500;
 }
 
-/* 滚动条美化 */
+/* 模态框内的自定义下拉框样式 */
+.custom-select-wrapper.full-width {
+  width: 100%;
+}
+
+/* 确保下拉菜单层级高于模态框其他内容 */
+.custom-select-options {
+  z-index: 2100; /* 高于模态框的 2000 */
+}
 .custom-select-options::-webkit-scrollbar {
   width: 6px;
 }
@@ -686,11 +776,14 @@ export default {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .alarm-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 1000px;
 }
 
 .alarm-table thead tr {
@@ -721,6 +814,9 @@ export default {
   padding: 14px 16px;
   color: #e2e8f0;
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .id-badge {
@@ -745,6 +841,29 @@ export default {
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  white-space: nowrap;
+}
+
+.category-rail, .category-铁路,
+.category-contactline, .category-接触网 {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.category-bridge, .category-桥梁 {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.category-protected-area, .category-保护区 {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.3);
 }
 
 .status-pending {
@@ -788,6 +907,11 @@ export default {
 .action-buttons {
   display: flex;
   gap: 6px;
+  justify-content: center;
+}
+
+.text-center {
+  text-align: center !important;
 }
 
 .action-btn {

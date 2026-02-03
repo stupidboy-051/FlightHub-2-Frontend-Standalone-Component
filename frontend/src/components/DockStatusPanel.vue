@@ -4,10 +4,6 @@
     <div class="panel-header">
       <!-- 统计概览 - 嵌入式 -->
       <div class="status-summary">
-        <!-- <div class="summary-item">
-          <span class="summary-label">总数:</span>
-          <span class="summary-value">{{ statistics.total_docks }}</span>
-        </div> -->
         <div class="summary-item online">
           <span class="summary-icon">✅</span>
           <span class="summary-label">在线:</span>
