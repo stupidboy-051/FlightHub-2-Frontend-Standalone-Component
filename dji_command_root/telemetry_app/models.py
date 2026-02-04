@@ -158,6 +158,40 @@ class Alarm(models.Model):
 
 
 # ----------------------------------------------------------------------
+# 1.1 告警统计缓存（首页看板）
+# ----------------------------------------------------------------------
+
+class AlarmDashboardStats(models.Model):
+    """
+    告警统计缓存表：用于首页「告警统计」「巡检故障处理率」卡片
+    由定时任务周期性写入，前端直接读取本表结果
+    """
+    METRIC_CHOICES = [
+        ("detect_type", "告警统计"),
+        ("handle_rate", "巡检故障处理率"),
+    ]
+
+    metric = models.CharField(max_length=20, choices=METRIC_CHOICES, verbose_name="统计类型")
+    range_days = models.PositiveIntegerField(default=30, verbose_name="统计范围(天)")
+
+    total = models.IntegerField(default=0, verbose_name="总数")
+    series = models.JSONField(default=list, verbose_name="序列数据")
+
+    window_start = models.DateTimeField(verbose_name="统计窗口开始")
+    window_end = models.DateTimeField(verbose_name="统计窗口结束")
+    computed_at = models.DateTimeField(auto_now=True, verbose_name="计算时间")
+
+    class Meta:
+        verbose_name = "告警看板统计缓存"
+        verbose_name_plural = "告警看板统计缓存"
+        ordering = ["-computed_at"]
+        unique_together = ("metric", "range_days")
+
+    def __str__(self):
+        return f"{self.metric} ({self.range_days}d)"
+
+
+# ----------------------------------------------------------------------
 # 2. 巡检任务与图片 (过程数据)
 # ----------------------------------------------------------------------
 

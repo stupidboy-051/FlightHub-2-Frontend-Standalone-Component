@@ -134,5 +134,16 @@ export default {
       console.error('获取告警类型列表失败:', error)
       throw error
     }
+  },
+
+  // 获取首页告警统计缓存
+  async getAlarmDashboardStats(params = {}) {
+    try {
+      const response = await api.get('/alarm-dashboard-stats/summary/', { params })
+      return response
+    } catch (error) {
+      console.error('获取告警看板统计缓存失败:', error)
+      throw error
+    }
   }
 }

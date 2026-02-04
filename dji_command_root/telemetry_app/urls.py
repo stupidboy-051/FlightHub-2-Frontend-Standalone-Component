@@ -44,5 +44,6 @@ urlpatterns = [
     path('start_manual_task', views.start_manual_task),
     path('start_selected_tasks', views.start_selected_tasks),
     path('stop_detect', views.stop_detect),
+    path('alarm-dashboard-stats/summary/', views.alarm_dashboard_stats_summary),
     path('', include(router.urls)),
 ]

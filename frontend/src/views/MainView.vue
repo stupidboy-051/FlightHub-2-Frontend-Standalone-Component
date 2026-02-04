@@ -1707,39 +1707,44 @@ initCesiumMap() {
 }
 .legend-item {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 6px;
   background: rgba(15, 23, 42, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 8px 10px;
+  padding: 6px 8px;
 }
 .legend-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   flex-shrink: 0;
+  margin-top: 3px;
 }
 .legend-text {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   width: 100%;
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 .legend-name {
-  flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-weight: 700;
 }
 .legend-value {
   color: #e0f2fe;
   font-weight: 900;
-  flex-shrink: 0;
+  align-self: flex-end;
+  font-size: 11px;
+  line-height: 1.2;
 }
 .ai-card {
   display: flex;

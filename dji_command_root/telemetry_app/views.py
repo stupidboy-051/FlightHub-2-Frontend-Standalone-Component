@@ -52,7 +52,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
@@ -62,7 +62,7 @@ from rest_framework.reverse import reverse
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
-    Alarm, AlarmCategory, Wayline, WaylineImage,
+    Alarm, AlarmCategory, AlarmDashboardStats, Wayline, WaylineImage,
     ComponentConfig, MediaFolderConfig, InspectTask, InspectImage, UserProfile,
     DronePosition, FlightTaskInfo, DockStatus, SuspiciousImage
 )
@@ -78,6 +78,7 @@ from .serializers import (
 )
 
 from .filters import AlarmFilter, WaylineImageFilter
+from .alarm_dashboard_stats import resolve_window, upsert_alarm_dashboard_stats
 from .permissions import IsSystemAdmin
 from .pagination import StandardResultsSetPagination
 
@@ -3494,6 +3495,61 @@ def stop_detect(request):
             return JsonResponse({"code": 500, "msg": str(e)})
 
     return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def alarm_dashboard_stats_summary(request):
+    """
+    首页告警统计/处置率缓存读取
+    GET /api/v1/alarm-dashboard-stats/summary/?metric=detect_type&range_days=30
+    可选参数: refresh=1 (若无缓存则即时计算并写入)
+    """
+    metric = request.query_params.get("metric", "detect_type")
+    try:
+        range_days = int(request.query_params.get("range_days", 30))
+    except (TypeError, ValueError):
+        range_days = 30
+    refresh = str(request.query_params.get("refresh", "0")).lower() in {"1", "true", "yes"}
+
+    obj = (
+        AlarmDashboardStats.objects.filter(metric=metric, range_days=range_days)
+        .order_by("-computed_at")
+        .first()
+    )
+
+    if not obj and refresh:
+        obj = upsert_alarm_dashboard_stats(range_days, metric)
+
+    if not obj:
+        window_start, window_end = resolve_window(range_days)
+        return Response(
+            {
+                "metric": metric,
+                "range_days": range_days,
+                "total": 0,
+                "series": [],
+                "window": {
+                    "start": window_start.isoformat(),
+                    "end": window_end.isoformat(),
+                },
+                "computed_at": None,
+            }
+        )
+
+    return Response(
+        {
+            "metric": obj.metric,
+            "range_days": obj.range_days,
+            "total": obj.total,
+            "series": obj.series,
+            "window": {
+                "start": obj.window_start.isoformat() if obj.window_start else None,
+                "end": obj.window_end.isoformat() if obj.window_end else None,
+            },
+            "computed_at": obj.computed_at.isoformat() if obj.computed_at else None,
+        }
+    )
 
 
 class WaylineFingerprintManager:

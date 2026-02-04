@@ -102,6 +102,16 @@ function resolveRangeWindow(days) {
   return { start, end }
 }
 
+function normalizeDashboardStatsResponse(res, fallbackWindow) {
+  if (!res) {
+    return { total: 0, series: [], window: fallbackWindow || null }
+  }
+  const total = Number(res.total ?? 0)
+  const series = Array.isArray(res.series) ? res.series : []
+  const window = res.window || fallbackWindow || null
+  return { total, series, window, computedAt: res.computed_at ?? res.computedAt ?? null }
+}
+
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0)
 }
@@ -489,29 +499,21 @@ export default {
 
 
   async getDetectTypeStatsByRange({ days = 30 } = {}) {
-    const { start, end } = resolveRangeWindow(days)
-    const alarmsRes = await fetchAllAlarmsByPaging({
-      page_size: 2000,
-      ordering: '-created_at',
-      start_date: formatDateParam(start),
-      end_date: formatDateParam(end)
+    const fallbackWindow = resolveRangeWindow(days)
+    const res = await alarmApi.getAlarmDashboardStats({
+      metric: 'detect_type',
+      range_days: days
     })
-    const list = alarmsRes.collected || []
-    const { total, series } = buildDetectTypeSeries(list)
-    return { total, series, window: { start, end } }
+    return normalizeDashboardStatsResponse(res, fallbackWindow)
   },
 
   async getAlarmHandleRateStatsByRange({ days = 30 } = {}) {
-    const { start, end } = resolveRangeWindow(days)
-    const alarmsRes = await fetchAllAlarmsByPaging({
-      page_size: 2000,
-      ordering: '-created_at',
-      start_date: formatDateParam(start),
-      end_date: formatDateParam(end)
+    const fallbackWindow = resolveRangeWindow(days)
+    const res = await alarmApi.getAlarmDashboardStats({
+      metric: 'handle_rate',
+      range_days: days
     })
-    const list = alarmsRes.collected || []
-    const { total, series } = buildHandleRateSeries(list)
-    return { total, series, window: { start, end } }
+    return normalizeDashboardStatsResponse(res, fallbackWindow)
   },
 
   async getFlightStatsByRange({ days = 30 } = {}) {
