@@ -169,3 +169,23 @@ DJI_X_USER_TOKEN = "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtp
 DJI_X_PROJECT_UUID = "d41dc59e-cab1-4798-8f91-faca84ff4cb7"  # 你的项目ID
 DJI_X_Request_ID = "12345678"   # 任意唯一标识
 DJI_X_LANGUAGE = "zh"
+
+# =========================================================
+# 机场/无人机 映射配置
+# =========================================================
+
+# 1. SN -> 流ID 映射 (用于 ZLM 流查找)
+# 格式: "无人机SN": "ZLM流ID"
+DOCK_STREAM_MAPPING = {
+    "1581F8HGX255D00A0DK8": "drone07",   # 工业大学机场-无人机
+    "8UUXN4900A052C": "dock01",          # 工业大学机场-监控
+    "8UUXN4900A052D": "dock02",          # 示例: 其他机场
+}
+
+# 2. SN -> 中文名称 映射 (用于日志显示)
+# 格式: "无人机SN": "显示名称"
+DOCK_NAME_MAPPING = {
+    "1581F8HGX255D00A0DK8": "工业大学无人机",
+    "8UUXN4900A052C": "工业大学机场",
+    "8UUXN4R00A06Q6": "马贝机场",
+}

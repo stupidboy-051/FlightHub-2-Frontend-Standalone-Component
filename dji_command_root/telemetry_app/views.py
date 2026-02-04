@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import time
+import math  # 🔥 Added for GPS calculation
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait
 import requests
@@ -24,10 +25,16 @@ import zipfile
 import io
 import re
 import tempfile
+CV2_IMPORT_ERROR = None
 try:
     import cv2
-except ImportError:
+except ImportError as e:
     cv2 = None
+    CV2_IMPORT_ERROR = str(e)
+except Exception as e:
+    cv2 = None
+    CV2_IMPORT_ERROR = f"Unexpected Error: {str(e)}"
+
 from django.conf import settings  # 🔥 必须导入 settings
 from .models import WaylineFingerprint, Wayline, AlarmCategory
 
@@ -87,6 +94,9 @@ from .pagination import StandardResultsSetPagination
 # 1. 核心业务逻辑 helper (新增/修改部分)
 # ======================================================================
 
+# 🔥 全局信号量：限制同时处理视频的线程数不超过 2 个
+VIDEO_PROCESS_SEMAPHORE = threading.BoundedSemaphore(2)
+
 def get_minio_client():
     return boto3.client(
         "s3",
@@ -95,6 +105,132 @@ def get_minio_client():
         aws_secret_access_key=settings.MINIO_SECRET_KEY,
         region_name=getattr(settings, "MINIO_REGION", "us-east-1"),
         config=Config(signature_version="s3v4"),
+    )
+
+def calculate_drone_gps(target_time_utc):
+    """
+    根据目标时间(UTC)查找最近的无人机位置并计算目标点坐标
+    """
+    from datetime import timedelta
+    
+    # 1. 查找最近记录 (前后 2 秒)
+    start_time = target_time_utc - timedelta(seconds=2)
+    end_time = target_time_utc + timedelta(seconds=2)
+    
+    logs = DronePosition.objects.filter(
+        timestamp__range=(start_time, end_time)
+    ).only('timestamp', 'latitude', 'longitude', 'altitude', 'raw_data', 'heading')
+    
+    if not logs.exists():
+        return None
+        
+    # 内存中找最近
+    nearest_log = min(logs, key=lambda x: abs((x.timestamp - target_time_utc).total_seconds()))
+    
+    # 2. 计算坐标
+    try:
+        data = nearest_log.raw_data.get("data", {}) if nearest_log.raw_data else {}
+        # 兼容不同 payload 结构
+        if "latitude" not in data and "lat" not in data:
+             if "latitude" in nearest_log.raw_data:
+                 data = nearest_log.raw_data
+        
+        # 优先使用 raw_data 里的，如果没有则用模型字段
+        drone_lat = float(data.get("latitude") or nearest_log.latitude or 0)
+        drone_lon = float(data.get("longitude") or nearest_log.longitude or 0)
+        height = float(data.get("height") or data.get("altitude") or nearest_log.altitude or 0)
+        
+        # 提取 Payload (挂载设备信息)
+        payload = data.get("99-0-0", {})
+        if not payload and "output" in data:
+             payload = data.get("output", {}).get("ext", {})
+
+        pitch = float(payload.get("gimbal_pitch", 0))
+        yaw = float(payload.get("gimbal_yaw", 0))
+        
+        # 修正：如果 payload 里没找到 pitch/yaw，尝试从 data 根节点找
+        if pitch == 0 and "gimbal_pitch" in data:
+            pitch = float(data["gimbal_pitch"])
+        if yaw == 0 and "gimbal_yaw" in data:
+            yaw = float(data["gimbal_yaw"])
+            
+        # 如果还是没有 Yaw，使用无人机的 heading
+        if yaw == 0 and nearest_log.heading is not None:
+            yaw = float(nearest_log.heading)
+
+        dji_lat = float(payload.get("measure_target_latitude", 0))
+        dji_lon = float(payload.get("measure_target_longitude", 0))
+        dji_alt = float(payload.get("measure_target_altitude", -9999)) # 目标海拔
+        error_state = int(payload.get("measure_target_error_state", 1))
+
+        # --- 策略 A: 硬件测距 ---
+        if error_state == 0 and dji_lat != 0:
+            return {
+                "lat": dji_lat, 
+                "lon": dji_lon, 
+                "high": dji_alt if dji_alt != -9999 else height, # 优先用测距高度
+                "method": "HARDWARE_RTK"
+            }
+
+        # --- 策略 B/C 参数准备 ---
+        R_EARTH = 6378137.0
+        calc_distance = 0.0
+        method_tag = ""
+        final_target_alt = 0.0 # 推算模式下，默认高度为0 (地面)
+        
+        if pitch <= -10:
+            # 策略 B: 几何推算
+            angle_rad = math.radians(abs(pitch))
+            calc_distance = height / math.tan(angle_rad)
+            if calc_distance > 500: calc_distance = 500
+            method_tag = "TRIG_CALC"
+        else:
+            # 策略 C: 平视兜底
+            # 动态调整：如果无人机飞得很低(比如10米)，只看前方20米
+            if height < 10:
+                calc_distance = 20.0
+            else:
+                calc_distance = 80.0
+            method_tag = "FIXED_ESTIMATE"
+            
+        # --- 坐标投影 ---
+        yaw_rad = math.radians(yaw)
+        delta_north = calc_distance * math.cos(yaw_rad)
+        delta_east = calc_distance * math.sin(yaw_rad)
+        
+        delta_lat = (delta_north / R_EARTH) * (180 / math.pi)
+        # 经度变化 (需考虑纬度收敛)
+        delta_lon = (delta_east / (R_EARTH * math.cos(math.radians(drone_lat)))) * (180 / math.pi)
+        
+        return {
+            "lat": drone_lat + delta_lat,
+            "lon": drone_lon + delta_lon,
+            "high": final_target_alt,
+            "method": method_tag
+        }
+        
+    except Exception as e:
+        print(f"❌ [GPS Calc] 计算异常: {e}")
+        # 保底返回无人机位置
+        return {
+            "lat": float(nearest_log.latitude),
+            "lon": float(nearest_log.longitude),
+            "high": float(nearest_log.altitude),
+            "method": "FALLBACK_DRONE_POS"
+        }
+
+
+def put_object_bytes(s3_client, bucket_name, object_name, data: bytes, content_type: str = "application/octet-stream"):
+    """
+    MinIO上传辅助函数：自动封装BytesIO并处理长度
+    """
+    data_stream = io.BytesIO(data)
+    # boto3 put_object 会自动计算 BytesIO 的长度
+    return s3_client.put_object(
+        Bucket=bucket_name,
+        Key=object_name,
+        Body=data_stream,
+        ContentType=content_type
     )
 
 def safe_save(instance, retries=5, delay=0.5, **kwargs):
@@ -522,6 +658,11 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
         "object_key": img.object_key,
         "detect_type": algo_type
     }
+
+    # 🔥 [新增] 注入 GPS 信息 (如果之前的步骤计算出来了)
+    if img.result and isinstance(img.result, dict) and "gps" in img.result:
+        payload["gps"] = img.result["gps"]
+        # print(f"📤 [Detect] 注入 GPS 信息到算法请求: {payload['gps']}")
 
     # 🔥 性能监控：记录开始时间
     detect_start_time = time.time()
@@ -1336,16 +1477,19 @@ def process_video_task(task, s3_client, bucket, video_key):
         print("❌ [Video] OpenCV 未安装，跳过视频处理")
         return
 
-    print(f"🎬 [Video] 开始处理视频: {video_key}")
-    
-    # 下载视频
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_video:
-        try:
-            s3_client.download_fileobj(bucket, video_key, tmp_video)
-            tmp_path = tmp_video.name
-        except Exception as e:
-            print(f"❌ [Video] 下载失败: {e}")
-            return
+    # 🔥 申请信号量，控制并发数
+    print(f"⏳ [Video] 正在排队等待处理资源: {video_key} (当前并发限制: 2)")
+    with VIDEO_PROCESS_SEMAPHORE:
+        print(f"🎬 [Video] 开始处理视频: {video_key}")
+        
+        # 下载视频
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_video:
+            try:
+                s3_client.download_fileobj(bucket, video_key, tmp_video)
+                tmp_path = tmp_video.name
+            except Exception as e:
+                print(f"❌ [Video] 下载失败: {e}")
+                return
 
     try:
         cap = cv2.VideoCapture(tmp_path)
@@ -1373,13 +1517,16 @@ def process_video_task(task, s3_client, bucket, video_key):
                     fname = f"{video_name}_frame_{saved_count:04d}.jpg"
                     key = folder_prefix + fname
                     try:
-                        s3_client.put_object(
-                            Bucket=bucket, Key=key, 
-                            Body=io.BytesIO(buf), ContentType="image/jpeg"
+                        put_object_bytes(
+                            s3_client,
+                            bucket,
+                            key,
+                            buf.tobytes(),
+                            content_type="image/jpeg"
                         )
                         saved_count += 1
                     except Exception as e:
-                        print(f"❌ Upload Fail: {e}")
+                        print(f"❌ [Video Upload Error] 切片上传失败! Bucket={bucket}, Key={key}, Error={e}")
             frame_idx += 1
             
         cap.release()
@@ -1431,6 +1578,12 @@ def minio_poller_worker2():
             # 第一步：发现 MinIO 里的所有“子任务文件夹”
             # =========================================================
             paginator = s3.get_paginator('list_objects_v2')
+            
+            # 数据结构升级：
+            # found_sub_folders[folder_prefix] = {
+            #     'sample_key': '...',  # 用于创建任务时的采样（优先存图片）
+            #     'video_keys': []      # 存储该文件夹下所有的 .mp4 文件
+            # }
             found_sub_folders = {}
             
             # 调试：打印扫描配置
@@ -1452,18 +1605,34 @@ def minio_poller_worker2():
                         idx = parts.index("media")
                         if len(parts) > idx + 2:
                             folder_prefix = "/".join(parts[:idx + 2]) + "/"
+                            
+                            # 初始化字典结构
                             if folder_prefix not in found_sub_folders:
-                                found_sub_folders[folder_prefix] = key
-                            else:
-                                # 如果当前存储的是视频，但新发现的是图片，则替换为图片
-                                current_sample = found_sub_folders[folder_prefix]
-                                if current_sample.lower().endswith(".mp4") and is_image:
-                                    found_sub_folders[folder_prefix] = key
+                                found_sub_folders[folder_prefix] = {
+                                    'sample_key': key,
+                                    'video_keys': []
+                                }
+                            
+                            # 获取当前记录
+                            entry = found_sub_folders[folder_prefix]
+                            
+                            # 1. 收集视频列表
+                            if is_video:
+                                entry['video_keys'].append(key)
+                            
+                            # 2. 优化 sample_key：优先保留图片作为采样（用于指纹识别），
+                            #    如果当前是视频，遇到图片则替换。
+                            current_sample = entry['sample_key']
+                            if current_sample.lower().endswith(".mp4") and is_image:
+                                entry['sample_key'] = key
 
             # =========================================================
             # 第二步：处理每一个发现的子文件夹 (创建或更新)
             # =========================================================
-            for folder_prefix, sample_key in found_sub_folders.items():
+            for folder_prefix, entry in found_sub_folders.items():
+                sample_key = entry['sample_key']
+                video_keys = entry['video_keys']
+                
                 folder_uuid = folder_prefix.strip('/').split('/')[-1]
                 
                 # 尝试获取已存在的任务
@@ -1526,6 +1695,34 @@ def minio_poller_worker2():
                     
                     if not fingerprint:
                         print(f"⚠️ [Skip] UUID {uuid} 未匹配到任何航线指纹，将创建【未分类】任务以便测试")
+                        
+                        # 🔥 [修复] 尝试调用司空接口查询航线 (重点解决保护区/视频任务关联航线问题)
+                        target_wayline = None
+                        target_category = None
+                        
+                        try:
+                            # 尝试获取任务详情
+                            api_data = fetch_dji_task_info(folder_uuid)
+                            if api_data:
+                                # 1. 尝试关联航线
+                                wl_uuid = api_data.get("wayline_uuid")
+                                if wl_uuid:
+                                    # 注意：这里需要确保 Wayline 和 AlarmCategory 已引入
+                                    target_wayline = Wayline.objects.filter(wayline_id=wl_uuid).first()
+                                    
+                                    if target_wayline:
+                                        print(f"🔗 [API Match] 通过接口关联到航线: {target_wayline.name}")
+                                        
+                                        # 2. 自动推断分类 (如果有航线类型)
+                                        if target_wayline.detect_type:
+                                            cat_code = normalize_detect_code(target_wayline.detect_type)
+                                            target_category = AlarmCategory.objects.filter(code__iexact=cat_code).first()
+                                            if target_category:
+                                                print(f"🏷️ [API Match] 自动归类: {target_category.name}")
+                                                
+                        except Exception as e:
+                            print(f"⚠️ [API Fail] 查询任务详情失败: {e}")
+
                         # 降级策略：创建未分类任务
                         job_id = folder_uuid
                         date_str = django_timezone.now().strftime('%Y-%m-%d')
@@ -1551,8 +1748,8 @@ def minio_poller_worker2():
                         )
 
                         # 确定分类
-                        target_category = None
-                        if is_video_task:
+                        # 视频任务默认逻辑：如果没有从 API 查到分类，则默认为保护区
+                        if is_video_task and not target_category:
                             target_category = AlarmCategory.objects.filter(code='protected_area').first()
 
                         # 创建子任务
@@ -1562,8 +1759,8 @@ def minio_poller_worker2():
                             external_task_id=folder_uuid,
                             bucket=bucket_name,
                             prefix_list=[folder_prefix],
-                            wayline=None,  # 无航线
-                            detect_category=target_category, # 视频任务有分类
+                            wayline=target_wayline,  # 🔥 使用 API 查到的航线
+                            detect_category=target_category, # 🔥 使用 API 查到或默认的分类
                             detect_status="scanning",
                             last_image_uploaded_at=django_timezone.now(),
                             dji_task_uuid=folder_uuid,
@@ -1574,7 +1771,16 @@ def minio_poller_worker2():
                         
                         # 🔥 如果是视频任务，立即触发切片处理
                         if is_video_task:
-                            threading.Thread(target=process_video_task, args=(target_task, s3, bucket_name, sample_key)).start()
+                            # 遍历所有视频进行处理（支持单任务多视频）
+                            for v_key in video_keys:
+                                v_name = os.path.splitext(os.path.basename(v_key))[0]
+                                # 精准去重：检查该视频是否已产生切片
+                                if not InspectImage.objects.filter(
+                                    inspect_task=target_task, 
+                                    object_key__contains=v_name
+                                ).exists():
+                                    print(f"🎬 [Video] 触发新视频处理: {v_key}")
+                                    threading.Thread(target=process_video_task, args=(target_task, s3, bucket_name, v_key)).start()
                     
                     else:
                         # 原有匹配逻辑
@@ -1651,21 +1857,40 @@ def minio_poller_worker2():
                 else:
                     target_task = existing_task
                     
-                    # 🔥 [自动修复] 如果是视频任务但没有切片图，说明之前处理失败（如缺OpenCV），需要重试
-                    # 注意：sample_key 如果是 mp4，说明该文件夹下尚未发现图片（或者顺序问题），结合数据库计数判断最准
-                    if sample_key.lower().endswith(".mp4"):
-                        img_cnt = InspectImage.objects.filter(inspect_task=target_task).count()
-                        if img_cnt == 0:
-                            # 使用缓存锁防止短时间内重复触发
-                            from django.core.cache import cache
-                            lock_key = f"retry_video_{target_task.id}"
-                            # 设置 5 分钟冷却时间，避免视频处理慢时重复提交
-                            if cache.add(lock_key, True, timeout=300): 
-                                print(f"♻️ [Retry] 发现视频任务 {target_task.external_task_id} 无切片，尝试重新触发处理...")
-                                threading.Thread(target=process_video_task, args=(target_task, s3, bucket_name, sample_key)).start()
-                            else:
-                                # 冷却中，不打印日志以免刷屏
-                                pass
+                    # 🔥 [自动修复] 检查视频任务的切片情况（支持多视频）
+                    if video_keys:
+                        for v_key in video_keys:
+                            v_name = os.path.splitext(os.path.basename(v_key))[0]
+                            
+                            # 1. 检查该特定视频是否已有切片
+                            has_slices = InspectImage.objects.filter(
+                                inspect_task=target_task, 
+                                object_key__contains=v_name
+                            ).exists()
+                            
+                            if not has_slices:
+                                # 使用缓存锁防止短时间内重复触发
+                                from django.core.cache import cache
+                                
+                                # 1. 频率控制 (5分钟一次) - 针对特定视频文件
+                                # 使用文件名的 hash 或直接用 key 作为锁的一部分
+                                import hashlib
+                                v_hash = hashlib.md5(v_key.encode()).hexdigest()
+                                lock_key = f"retry_video_{target_task.id}_{v_hash}"
+                                
+                                # 2. 次数控制 (最多3次)
+                                count_key = f"retry_count_video_{target_task.id}_{v_hash}"
+                                current_count = cache.get(count_key, 0)
+                                
+                                if current_count >= 3:
+                                    pass
+                                else:
+                                    if cache.add(lock_key, True, timeout=300): 
+                                        print(f"♻️ [Retry] 发现视频 {v_name} 无切片，尝试触发处理 ({current_count + 1}/3)...")
+                                        cache.set(count_key, current_count + 1, timeout=86400)
+                                        threading.Thread(target=process_video_task, args=(target_task, s3, bucket_name, v_key)).start()
+                                    else:
+                                        pass
 
                 
                 # =========================================================
@@ -1944,7 +2169,7 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
         task = self.get_object()
         # 🔥 优化：使用 select_related 预加载关联字段，避免 N+1
         # 虽然 inspect_task 已知，但 serializer 的 method field (get_signed_url) 可能仍需访问 task 属性
-        queryset = InspectImage.objects.filter(inspect_task=task).select_related('inspect_task').order_by("created_at", "id")
+        queryset = InspectImage.objects.filter(inspect_task=task).select_related('inspect_task', 'wayline').order_by("created_at", "id")
         # 🔥 优化：使用轻量级 Serializer，移除 inspect_task_details
         serializer = InspectImageListSerializer(queryset, many=True)
         return Response(serializer.data)
@@ -2418,6 +2643,26 @@ class MediaLibraryViewSet(viewsets.ViewSet):
         if mime_type: response["Content-Type"] = mime_type
         return response
 
+@csrf_exempt
+def debug_opencv_status(request):
+    """
+    OpenCV 状态诊断接口
+    GET /api/debug/opencv
+    """
+    import sys
+    import pkg_resources
+    
+    status_info = {
+        "cv2_installed": cv2 is not None,
+        "cv2_version": getattr(cv2, "__version__", "N/A"),
+        "import_error": CV2_IMPORT_ERROR,
+        "python_version": sys.version,
+        "python_path": sys.path,
+        "installed_packages": [f"{p.key}=={p.version}" for p in pkg_resources.working_set if "opencv" in p.key]
+    }
+    
+    return JsonResponse(status_info)
+
 
 # ======================================================================
 # 直播监听管理（保护区检测）
@@ -2698,16 +2943,15 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                 media_list_api = f"{ZLM_API_HOST}/index/api/getMediaList"
                 target_url = None
                 
-                # ⭐ SN 到 StreamID 的映射表 (解决配置名不一致问题)
-                SN_MAPPING = {
-                    "8UUXN4900A052C": "dock01",  # 工业大学机场
-                    "8UUXN4900A052D": "dock02",
-                }
+                # ⭐ 从 settings 获取映射配置
                 
                 # 确定要搜索的 ID 列表 (优先搜 SN，其次搜映射名)
                 search_ids = [stream_id]
-                if stream_id in SN_MAPPING:
-                    search_ids.append(SN_MAPPING[stream_id])
+                
+                # 使用 settings 中的配置进行映射
+                dock_mapping = getattr(settings, 'DOCK_STREAM_MAPPING', {})
+                if stream_id in dock_mapping:
+                    search_ids.append(dock_mapping[stream_id])
 
                 try:
                     media_resp = requests.get(media_list_api, params={"secret": ZLM_SECRET}, timeout=5)
@@ -2847,11 +3091,39 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                         ContentType='image/jpeg'
                     )
 
+                    # 🔥 [新增] 计算 GPS 坐标
+                    gps_result = {}
+                    try:
+                        from datetime import timedelta
+                        # 1. 获取当前 UTC 时间 (Django aware time)
+                        # 注意：必须使用 django_timezone.now()，不能用 datetime.now()
+                        capture_time = django_timezone.now()
+                        
+                        # 2. 修正延迟 (1.5s)
+                        flight_time = capture_time - timedelta(seconds=1.5)
+                        
+                        # 3. 计算
+                        gps_info = calculate_drone_gps(flight_time)
+                        
+                        if gps_info:
+                            gps_result = {"gps": gps_info}
+                            # 打印日志方便调试
+                            lat_val = gps_info.get('lat', 0)
+                            lon_val = gps_info.get('lon', 0)
+                            print(f"📍 [GPS] 图片 {fname} 坐标计算成功: {gps_info.get('method')} ({lat_val:.6f}, {lon_val:.6f})")
+                        else:
+                            print(f"⚠️ [GPS] 未找到附近的飞行记录，跳过坐标计算 (Time: {flight_time})")
+                            
+                    except Exception as gps_err:
+                        print(f"❌ [GPS] 计算流程异常: {gps_err}")
+                        gps_result = {}
+
                     InspectImage.objects.create(
                         inspect_task=current_task,
                         object_key=object_key,
                         detect_status='pending',
-                        wayline=current_task.wayline
+                        wayline=current_task.wayline,
+                        result=gps_result # 🔥 存入 result
                     )
                     frame_count += 1
                     loop_time = time_module.time() - loop_start_time
@@ -3897,11 +4169,36 @@ class WaylineFingerprintManager:
                                             actuator_param = action.find(".//wpml:actionActuatorFuncParam", ns) or action.find(".//{http://www.dji.com/wpmz/1.0.0}actionActuatorFuncParam")
                                             if actuator_param is None:
                                                 continue
+                                            
+                                            # 判断是否是保护区航线 (允许无 UUID 提取坐标)
+                                            is_protected_wayline = False
+                                            if category_obj:
+                                                cat_code = str(getattr(category_obj, 'code', '')).lower()
+                                                if 'protected' in cat_code or '保护区' in cat_code:
+                                                    is_protected_wayline = True
+                                            
+                                            # print(f"      🔍 [Debug] Check Action: is_protected={is_protected_wayline}, cat_code={getattr(category_obj, 'code', 'None')}")
+                                            
+                                            uuid = None
                                             uuid_node = actuator_param.find("wpml:actionUUID", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}actionUUID")
-                                            if uuid_node is None or not uuid_node.text:
+                                            
+                                            if uuid_node is not None and uuid_node.text:
+                                                uuid = uuid_node.text
+                                                uuid_set.add(uuid) # 只有真实 UUID 才加入匹配集合
+                                                # print(f"      ✅ [Debug] Found Real UUID: {uuid}")
+                                            
+                                            # 如果没有 UUID，且是保护区航线，生成虚拟 UUID 用于绘图
+                                            if not uuid and is_protected_wayline:
+                                                func_node = action.find("wpml:actionActuatorFunc", ns) or action.find("{http://www.dji.com/wpmz/1.0.0}actionActuatorFunc")
+                                                func_name = func_node.text if func_node is not None else "action"
+                                                # 使用索引生成唯一标识
+                                                uuid = f"virtual_{func_name}_{g_idx}_{actions.index(action)}"
+                                                # print(f"      🔧 [Debug] Generated Virtual UUID: {uuid}")
+                                            
+                                            if not uuid:
+                                                # print(f"      ⚠️ [Debug] Skip Action (No UUID)")
                                                 continue
-                                            uuid = uuid_node.text
-                                            uuid_set.add(uuid)
+
                                             yaw_node = actuator_param.find("wpml:gimbalYawRotateAngle", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}gimbalYawRotateAngle")
                                             gimbal_yaw = float(yaw_node.text) if yaw_node is not None else 0.0
                                             heading_node = actuator_param.find("wpml:aircraftHeading", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}aircraftHeading")
@@ -3949,14 +4246,19 @@ class WaylineFingerprintManager:
                             uuid_set.update(found)
 
             # D. 存入指纹表 (包含 detect_category 和 action_details)
-            if uuid_set:
+            # 🔥 [修复] 即使没有提取到 UUID，只要匹配了分类也入库，方便排查和记录
+            if uuid_set or category_obj:
                 fp, _ = WaylineFingerprint.objects.get_or_create(wayline=local_wayline)
                 fp.detect_category = category_obj
                 fp.action_uuids = list(uuid_set)
                 fp.action_details = action_details_list # 🔥 存入详细信息
                 fp.source_url = download_url
                 fp.save()
-                print(f"      💾 指纹入库成功 (包含 {len(uuid_set)} 个 UUID, {len(action_details_list)} 条详情)")
+                
+                if uuid_set:
+                    print(f"      💾 指纹入库成功 (包含 {len(uuid_set)} 个 UUID, {len(action_details_list)} 条详情)")
+                else:
+                    print(f"      ⚠️ [Warning] 指纹入库 (无UUID): 航线 '{wayline_name}' 未提取到动作UUID，但已绑定分类 '{category_obj.name}'")
 
         except Exception as e:
             print(f"      ❌ 处理单条航线出错: {e}")

@@ -273,6 +273,9 @@ class InspectImage(models.Model):
     class Meta:
         verbose_name = "巡检图片"
         verbose_name_plural = "巡检图片"
+        indexes = [
+            models.Index(fields=['inspect_task', 'created_at']),
+        ]
 
 
 # ----------------------------------------------------------------------

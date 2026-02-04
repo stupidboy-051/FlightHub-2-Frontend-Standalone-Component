@@ -1,5 +1,6 @@
 import os
 import json
+from functools import lru_cache
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
@@ -28,6 +29,22 @@ from .models import (
 # ======================================================================
 # 🔥 [最终修正版] 解决 403 签名不匹配问题
 # ======================================================================
+
+@lru_cache(maxsize=1)
+def get_cached_signer_client():
+    """
+    全局缓存的签名客户端，避免每次请求都创建 boto3 连接
+    """
+    external_endpoint = os.getenv("MINIO_EXTERNAL_ENDPOINT", "http://127.0.0.1:9000")
+    return boto3.client(
+        "s3",
+        endpoint_url=external_endpoint,
+        aws_access_key_id=settings.MINIO_ACCESS_KEY,
+        aws_secret_access_key=settings.MINIO_SECRET_KEY,
+        region_name=getattr(settings, "MINIO_REGION", "us-east-1"),
+        config=Config(signature_version="s3v4"),
+    )
+
 def get_safe_presigned_url(bucket, key):
     """
     针对 Private 桶：使用外部 IP 初始化 Boto3 客户端进行签名，
@@ -37,21 +54,8 @@ def get_safe_presigned_url(bucket, key):
         return None
 
     try:
-        # 1. 获取外部访问地址 (前端浏览器用的那个地址)
-        # 例如: http://117.50.245.246:9000
-        external_endpoint = os.getenv("MINIO_EXTERNAL_ENDPOINT", "http://127.0.0.1:9000")
-
-        # 2. 专门创建一个客户端用于生成签名
-        # 注意：这里 endpoint_url 直接填外部地址！
-        # 虽然 Docker 内部连不上这个公网 IP，但 generate_presigned_url 是纯数学计算，不需要联网
-        signer_client = boto3.client(
-            "s3",
-            endpoint_url=external_endpoint,  # 🔥 关键点：用公网 IP 签名
-            aws_access_key_id=settings.MINIO_ACCESS_KEY,
-            aws_secret_access_key=settings.MINIO_SECRET_KEY,
-            region_name=getattr(settings, "MINIO_REGION", "us-east-1"),
-            config=Config(signature_version="s3v4"),
-        )
+        # 使用缓存的客户端
+        signer_client = get_cached_signer_client()
 
         # 3. 生成签名 URL
         # 此时生成的 URL 已经是 http://117.50.245.246:9000/... 且签名是匹配的

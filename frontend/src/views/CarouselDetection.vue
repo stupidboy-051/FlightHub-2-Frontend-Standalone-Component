@@ -16,34 +16,44 @@
         </div>
       </div>
       <div class="header-stats">
-        <div class="filter-group">
-          <label class="filter-label" for="type-select">检测类型</label>
-          <select
-            id="type-select"
-            class="wayline-select"
-            v-model="selectedType"
-            @change="handleFilterChange"
-          >
-            <option value="">全部类型</option>
-            <option v-for="item in detectionTypes" :key="item.code" :value="item.code">
+        <!-- 自定义下拉框 - 检测类型 -->
+        <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('type')">
+          <div class="custom-select-trigger" @click="toggleDropdown('type')" :class="{ 'is-open': activeDropdown === 'type' }">
+            <span>{{ getTypeLabel(selectedType) }}</span>
+            <span class="arrow-icon">▼</span>
+          </div>
+          <div v-show="activeDropdown === 'type'" class="custom-select-options">
+            <div class="option-item" :class="{ 'is-selected': selectedType === '' }" @click="selectType('')">全部类型</div>
+            <div 
+              v-for="item in detectionTypes" 
+              :key="item.code"
+              class="option-item" 
+              :class="{ 'is-selected': selectedType === item.code }" 
+              @click="selectType(item.code)"
+            >
               {{ item.name }}
-            </option>
-          </select>
+            </div>
+          </div>
         </div>
-        <div class="filter-group">
-          <label class="filter-label" for="wayline-select">航线</label>
-          <select
-            id="wayline-select"
-            class="wayline-select"
-            v-model="selectedWayline"
-            @change="handleFilterChange"
-            :disabled="loadingWaylines"
-          >
-            <option value="">全部航线</option>
-            <option v-for="item in filteredWaylines" :key="item.optionValue" :value="item.optionValue">
+
+        <!-- 自定义下拉框 - 航线 -->
+        <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('wayline')">
+          <div class="custom-select-trigger" @click="toggleDropdown('wayline')" :class="{ 'is-open': activeDropdown === 'wayline' }">
+            <span>{{ getWaylineLabel(selectedWayline) }}</span>
+            <span class="arrow-icon">▼</span>
+          </div>
+          <div v-show="activeDropdown === 'wayline'" class="custom-select-options">
+            <div class="option-item" :class="{ 'is-selected': selectedWayline === '' }" @click="selectWayline('')">全部航线</div>
+            <div 
+              v-for="item in filteredWaylines" 
+              :key="item.optionValue" 
+              class="option-item"
+              :class="{ 'is-selected': selectedWayline === item.optionValue }"
+              @click="selectWayline(item.optionValue)"
+            >
               {{ item.name || ('航线 ' + item.optionValue) }}
-            </option>
-          </select>
+            </div>
+          </div>
         </div>
         <div class="stat-chip">
           <span class="stat-label">检测中(任务)</span>
@@ -426,7 +436,23 @@ export default {
       latestManualTaskId: null,
       taskProgressMap: {}, // 记录每个任务的播放进度
       imageLoadError: false, // 图片加载失败状态
-      useFallbackImage: false // 是否使用降级图片（原图）
+      useFallbackImage: false, // 是否使用降级图片（原图）
+      activeDropdown: '' // 当前打开的下拉框
+    }
+  },
+  directives: {
+    'click-outside': {
+      mounted(el, binding) {
+        el.clickOutsideEvent = function(event) {
+          if (!(el === event.target || el.contains(event.target))) {
+            binding.value(event)
+          }
+        }
+        document.body.addEventListener('click', el.clickOutsideEvent)
+      },
+      unmounted(el) {
+        document.body.removeEventListener('click', el.clickOutsideEvent)
+      }
     }
   },
   watch: {
@@ -458,13 +484,20 @@ export default {
         return this.waylines
       }
       
-      const typeNode = this.detectionTree.find(node => node.code === this.selectedType)
-      if (!typeNode) return []
+      const filter = this.selectedType.toLowerCase()
+      const variantsMap = {
+        'rail': ['rail', 'track'],
+        'contactline': ['contactline', 'catenary', 'overhead', 'insulator', 'pole'],
+        'bridge': ['bridge'],
+        'protected_area': ['protected_area', 'protection_zone', 'protection_area']
+      }
       
-      // 提取该类型下的所有航线ID
-      const typeWaylineIds = new Set(typeNode.waylines.map(w => w.id))
+      const targetVariants = variantsMap[filter] || [filter]
       
-      return this.waylines.filter(w => typeWaylineIds.has(w.id))
+      return this.waylines.filter(wayline => {
+        const type = (wayline.detect_type || '').toLowerCase()
+        return targetVariants.some(v => type.includes(v))
+      })
     },
     // 统计当前筛选条件下的所有任务
     filteredTasks() {
@@ -828,18 +861,36 @@ export default {
     async loadWaylines() {
       this.loadingWaylines = true
       try {
-        // 后端已禁用分页，不需要传 page_size
-        const res = await waylineApi.getWaylines({})
-        const list = this.normalizeList(res)
+        let allWaylines = []
+        let page = 1
+        let hasNext = true
+        
+        while (hasNext) {
+          const res = await waylineApi.getWaylines({ page, page_size: 100 })
+          let list = []
+          
+          if (Array.isArray(res)) {
+             list = res
+             hasNext = false
+          } else {
+             list = res?.results || []
+             if (!res.next) {
+               hasNext = false
+             } else {
+               page++
+             }
+          }
+          allWaylines = allWaylines.concat(list)
+        }
 
-        console.log('📊 API返回航线数量:', list.length)
-        console.log('📊 所有航线ID:', list.map(w => w.id).sort((a, b) => a - b))
+        console.log('📊 API返回航线数量:', allWaylines.length)
+        console.log('📊 所有航线ID:', allWaylines.map(w => w.id).sort((a, b) => a - b))
 
         // 保存所有航线数据
-        this.allWaylines = list
+        this.allWaylines = allWaylines
 
         // 构建原有的 waylines 数组（用于筛选）
-        this.waylines = list
+        this.waylines = allWaylines
           .map(item => {
             const optionValue = item.wayline_id ?? item.id
             if (optionValue === undefined || optionValue === null) return null
@@ -1057,6 +1108,39 @@ export default {
       console.log(`🎬 开始回放任务: ${name} (第 ${this.currentTaskIndex + 1}/${this.taskQueue.length} 个)`)
       this.allTasksCompleted = false // 重置完成标志
       await this.startInspectPlaybackForFolder(taskOrName)
+    },
+    // 下拉框控制方法
+    toggleDropdown(type) {
+      if (this.activeDropdown === type) {
+        this.activeDropdown = ''
+      } else {
+        this.activeDropdown = type
+      }
+    },
+    closeDropdown(type) {
+      if (this.activeDropdown === type) {
+        this.activeDropdown = ''
+      }
+    },
+    selectType(code) {
+      this.selectedType = code
+      this.activeDropdown = ''
+      this.handleFilterChange()
+    },
+    selectWayline(id) {
+      this.selectedWayline = id
+      this.activeDropdown = ''
+      this.handleFilterChange()
+    },
+    getTypeLabel(code) {
+      if (!code) return '全部类型'
+      const type = this.detectionTypes.find(t => t.code === code)
+      return type ? type.name : code
+    },
+    getWaylineLabel(id) {
+      if (!id) return '全部航线'
+      const w = this.waylines.find(item => item.optionValue === id)
+      return w ? (w.name || '航线 ' + id) : id
     },
     handleFilterChange() {
       // 如果切换了类型，且当前选中的航线不在新类型的航线列表中，重置航线选择
@@ -2166,30 +2250,126 @@ export default {
   align-items: center;
 }
 
-.filter-group {
+/* 自定义下拉框样式 */
+.custom-select-wrapper {
+  position: relative;
+  min-width: 160px;
+}
+
+.custom-select-wrapper:last-child {
+  min-width: 240px;
+}
+
+.custom-select-trigger {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: rgba(15, 23, 42, 0.5);
-  border: 1px solid rgba(14, 165, 233, 0.25);
-  border-radius: 12px;
-  padding: 8px 10px;
-  min-width: 180px;
-}
-
-.filter-label {
-  color: #94a3b8;
-  font-size: 12px;
-}
-
-.wayline-select {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(14, 165, 233, 0.35);
-  background: rgba(12, 18, 36, 0.8);
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(10, 14, 39, 0.6);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
   color: #e2e8f0;
-  outline: none;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  user-select: none;
+  min-width: 160px;
+}
+
+.custom-select-trigger:hover,
+.custom-select-trigger.is-open {
+  border-color: #3b82f6;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+  background: rgba(10, 14, 39, 0.8);
+}
+
+.custom-select-trigger span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 8px;
+  max-width: 200px;
+}
+
+.arrow-icon {
+  font-size: 10px;
+  color: #64748b;
+  transition: transform 0.3s ease;
+  margin-left: 8px;
+}
+
+.custom-select-trigger.is-open .arrow-icon {
+  transform: rotate(180deg);
+  color: #3b82f6;
+}
+
+.custom-select-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  /* right: 0; 移除 right: 0，允许宽度自适应 */
+  min-width: 100%; /* 确保至少和触发器一样宽 */
+  /* width: max-content;  移除 max-content，防止过宽 */
+  max-width: 320px; /* 限制最大宽度，强制换行 */
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+  animation: dropdownFadeIn 0.2s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.option-item {
+  padding: 10px 16px;
+  color: #cbd5e1;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  /* 移除截断，允许换行 */
+  white-space: normal;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.option-item:last-child {
+  border-bottom: none;
+}
+
+.option-item:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #fff;
+}
+
+.option-item.is-selected {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.custom-select-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-select-options::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.custom-select-options::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.3);
+  border-radius: 3px;
+}
+
+.custom-select-options::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.5);
 }
 
 .stat-chip {

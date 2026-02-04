@@ -15,6 +15,9 @@ import urllib3
 # 禁用 HTTPS 不安全警告 (针对私有化部署自签名证书)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# 🏭 机场名称全局映射字典 (从 start_mqtt.py 迁移)
+# 🔥 改为从 settings 动态获取，确保配置统一
+DOCK_NAME_MAPPING = getattr(settings, 'DOCK_NAME_MAPPING', {})
 
 class Command(BaseCommand):
     help = '启动 MQTT 监听服务，连接司空 EMQX 并异步下载文件'
@@ -408,10 +411,20 @@ class Command(BaseCommand):
             from django.utils import timezone
 
             # 获取或创建机场状态记录
+            defaults_data = {'dock_name': f'机场-{dock_sn[-4:]}'}
+            
+            # 🔥 优先使用硬编码的中文名称
+            if dock_sn in DOCK_NAME_MAPPING:
+                defaults_data['dock_name'] = DOCK_NAME_MAPPING[dock_sn]
+
             dock, created = DockStatus.objects.get_or_create(
                 dock_sn=dock_sn,
-                defaults={'dock_name': f'机场-{dock_sn[-4:]}'}
+                defaults=defaults_data
             )
+            
+            # 如果是更新现有记录，也强制刷新名称（防止之前被覆盖）
+            if not created and dock_sn in DOCK_NAME_MAPPING:
+                dock.dock_name = DOCK_NAME_MAPPING[dock_sn]
 
             # 更新位置信息
             if 'latitude' in payload:

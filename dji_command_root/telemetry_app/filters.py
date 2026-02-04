@@ -1,5 +1,6 @@
 ﻿# telemetry_app/filters.py
 import django_filters
+from django.db.models import Q
 from .models import Alarm, AlarmCategory, WaylineImage
 
 
@@ -29,11 +30,36 @@ class AlarmFilter(django_filters.FilterSet):
         field_name='image_url',
         lookup_expr='icontains'
     )
-    # 🔥 新增：按检测类型过滤（通过 wayline 的 detect_type）
-    detect_type = django_filters.CharFilter(
-        field_name='wayline__detect_type',
-        lookup_expr='exact'
-    )
+    # 🔥 新增：按检测类型过滤（通过 wayline 的 detect_type 或 category 的 code）
+    detect_type = django_filters.CharFilter(method='filter_detect_type')
+
+    def filter_detect_type(self, queryset, name, value):
+        if not value:
+            return queryset
+            
+        value = value.lower()
+        variants_map = {
+            "rail": {"rail", "track"},
+            "contactline": {"contactline", "catenary", "overhead", "insulator", "pole"},
+            "bridge": {"bridge"},
+            "protected_area": {"protected_area", "protection_zone", "protection_area"},
+        }
+        
+        variants = set()
+        for k, v in variants_map.items():
+            if value in v or value == k:
+                variants.update(v)
+                variants.add(k)
+        
+        if not variants:
+            variants = {value}
+            
+        q = Q()
+        for v in variants:
+            q |= Q(wayline__detect_type__iexact=v)
+            q |= Q(category__code__iexact=v)
+            
+        return queryset.filter(q)
 
     class Meta:
         model = Alarm
