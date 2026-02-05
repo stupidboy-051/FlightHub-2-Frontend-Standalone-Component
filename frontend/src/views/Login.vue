@@ -126,7 +126,9 @@ export default {
 <style scoped>
 /* 登录容器 */
 .login-container-premium {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;

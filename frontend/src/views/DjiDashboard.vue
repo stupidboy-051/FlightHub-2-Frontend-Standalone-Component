@@ -2641,7 +2641,7 @@ export default {
 
 <style scoped>
 .dashboard-premium {
-  min-height: 100vh;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -2651,7 +2651,7 @@ export default {
   radial-gradient(circle at 80% 0, rgba(0, 153, 255, 0.06), transparent 30%),
   #0b1024;
   color: #e2e8f0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* 页面头部 */
@@ -2826,9 +2826,8 @@ export default {
   grid-template-columns: 320px 1fr;
   grid-template-rows: minmax(0, 1fr);
   gap: 24px;
-  height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* 侧边面板 */

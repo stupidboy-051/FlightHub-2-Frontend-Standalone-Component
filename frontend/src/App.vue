@@ -150,7 +150,7 @@
     </div>
 
     <!-- 主内容区域 -->
-    <div class="main-content">
+    <div class="main-content" :class="{ 'main-content--login': isLoginRoute }">
       <router-view />
     </div>
   </div>
@@ -212,6 +212,9 @@ export default {
     window.removeEventListener("resize", this.updateLogoShift);
   },
   computed: {
+    isLoginRoute() {
+      return this.$route && this.$route.name === 'Login';
+    },
     logoShiftStyle() {
       const shift = this.isNavExpanded ? 0 : this.logoShift;
       return { transform: `translateX(${shift}px)` };
@@ -637,8 +640,14 @@ body {
   left: 0;
   right: 0;
   z-index: 1;
-  overflow: hidden; /* 防止内容溢出，滚动由各页面自己处理 */
+  overflow: auto; /* 全页滚动 */
   padding: 24px;
+}
+
+.main-content--login {
+  top: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 /* 全局滚动条 */
