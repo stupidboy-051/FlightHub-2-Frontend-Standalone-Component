@@ -122,6 +122,16 @@ def calculate_drone_gps(target_time_utc):
     ).only('timestamp', 'latitude', 'longitude', 'altitude', 'raw_data', 'heading')
     
     if not logs.exists():
+        # 🔥 终极兜底：如果时间点找不到，尝试找最近的一条记录 (不限时间)
+        latest_log = DronePosition.objects.order_by('-timestamp').first()
+        if latest_log:
+             print(f"⚠️ [GPS Calc] 指定时间无记录，使用最近一次已知位置兜底 (Time: {latest_log.timestamp})")
+             return {
+                "lat": float(latest_log.latitude),
+                "lon": float(latest_log.longitude),
+                "high": float(latest_log.altitude),
+                "method": "FALLBACK_LATEST_POS"
+            }
         return None
         
     # 内存中找最近
@@ -3965,6 +3975,7 @@ class WaylineFingerprintManager:
         """
         处理单个命中的航线：入库 Wayline -> 获取 URL -> 下载 KMZ -> 入库 Fingerprint
         """
+        print(f"🚀 [Debug] process_single_wayline 版本: DEBUG_V2")
         try:
             # A. 确保存储了 Wayline 基本信息
             local_wayline, _ = Wayline.objects.update_or_create(
@@ -4177,7 +4188,7 @@ class WaylineFingerprintManager:
                                                 if 'protected' in cat_code or '保护区' in cat_code:
                                                     is_protected_wayline = True
                                             
-                                            # print(f"      🔍 [Debug] Check Action: is_protected={is_protected_wayline}, cat_code={getattr(category_obj, 'code', 'None')}")
+                                            print(f"      🔍 [Debug] Check Action: is_protected={is_protected_wayline}, cat_code={getattr(category_obj, 'code', 'None')}")
                                             
                                             uuid = None
                                             uuid_node = actuator_param.find("wpml:actionUUID", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}actionUUID")
@@ -4185,7 +4196,7 @@ class WaylineFingerprintManager:
                                             if uuid_node is not None and uuid_node.text:
                                                 uuid = uuid_node.text
                                                 uuid_set.add(uuid) # 只有真实 UUID 才加入匹配集合
-                                                # print(f"      ✅ [Debug] Found Real UUID: {uuid}")
+                                                print(f"      ✅ [Debug] Found Real UUID: {uuid}")
                                             
                                             # 如果没有 UUID，且是保护区航线，生成虚拟 UUID 用于绘图
                                             if not uuid and is_protected_wayline:
@@ -4193,10 +4204,10 @@ class WaylineFingerprintManager:
                                                 func_name = func_node.text if func_node is not None else "action"
                                                 # 使用索引生成唯一标识
                                                 uuid = f"virtual_{func_name}_{g_idx}_{actions.index(action)}"
-                                                # print(f"      🔧 [Debug] Generated Virtual UUID: {uuid}")
+                                                print(f"      🔧 [Debug] Generated Virtual UUID: {uuid}")
                                             
                                             if not uuid:
-                                                # print(f"      ⚠️ [Debug] Skip Action (No UUID)")
+                                                print(f"      ⚠️ [Debug] Skip Action (No UUID)")
                                                 continue
 
                                             yaw_node = actuator_param.find("wpml:gimbalYawRotateAngle", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}gimbalYawRotateAngle")
