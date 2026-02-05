@@ -975,7 +975,8 @@ initCesiumMap() {
         'pending': '待检测',
         'processing': '检测中',
         'done': '已完成',
-        'failed': '失败'
+        'failed': '失败',
+        'scanning': '扫描中'
       }
       return statusMap[status] || status
     },
