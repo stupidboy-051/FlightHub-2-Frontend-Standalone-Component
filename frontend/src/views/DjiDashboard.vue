@@ -529,6 +529,7 @@ export default {
     this.invertedTriangleImage = null
     this.alertTriangleIconCache = {}
     this.alarmEntities = []
+    this.alarmEntityMap = new Map()
     this.protectedAlarmIdSet = new Set()
     this.actionDetailEntities = []
     this.pickHandler = null
@@ -2489,6 +2490,9 @@ export default {
         const entity = this.viewer.entities.add({
           position,
           alarmData: alarm,
+          properties: new Cesium.PropertyBag({
+            alarmData: alarm
+          }),
           billboard: triangleImage ? {
             image: triangleImage,
             width: triangleSize,
@@ -2504,9 +2508,20 @@ export default {
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
         });
+        entity.alarmData = alarm;
         entities.push(entity);
+        if (this.alarmEntityMap) {
+          this.alarmEntityMap.set(entity, alarm);
+        }
       });
       this.alarmEntities = entities;
+      if (this.isPickDebugEnabled()) {
+        console.log('[AlarmMarkers] plotted', {
+          count: entities.length,
+          alarmCount: Array.isArray(alarms) ? alarms.length : 0,
+          mode: this.currentMode
+        });
+      }
     },
 
     clearAlarmMarkers() {
@@ -2514,6 +2529,9 @@ export default {
         this.alarmEntities.forEach(e => this.viewer.entities.remove(e));
       }
       this.alarmEntities = [];
+      if (this.alarmEntityMap) {
+        this.alarmEntityMap.clear();
+      }
     },
     resetDroneTrackingState() {
       this.lastDroneTimestamp = null;
@@ -2567,12 +2585,175 @@ export default {
       if (!this.viewer || this.pickHandler) return;
       this.pickHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
       this.pickHandler.setInputAction(click => {
-        const picked = this.viewer.scene.pick(click.position);
-        if (Cesium.defined(picked) && picked.id && picked.id.alarmData) {
-          this.currentAlarm = picked.id.alarmData;
-          this.showAlarmDetail = true;
+        if (this.isPickDebugEnabled()) {
+          console.log('[AlarmPick] click position', click?.position);
+        }
+        const pickPosition = this.normalizePickPosition(click?.position, Cesium);
+        if (this.isPickDebugEnabled()) {
+          console.log('[AlarmPick] normalized position', pickPosition);
+        }
+        const picks = this.viewer.scene.drillPick
+          ? this.viewer.scene.drillPick(pickPosition)
+          : [this.viewer.scene.pick(pickPosition)];
+        if (this.isPickDebugEnabled()) {
+          const summary = Array.isArray(picks) ? picks.map(picked => {
+            const entity = picked?.id || picked?.primitive?.id || picked?.primitive;
+            return {
+              type: picked?.constructor?.name,
+              entityType: entity?.constructor?.name,
+              hasAlarmData: Boolean(
+                entity?.alarmData
+                || entity?.properties?.alarmData?.getValue?.(Cesium.JulianDate.now())
+                || entity?.properties?.alarmData
+              )
+            };
+          }) : [];
+          console.log('[AlarmPick] pick summary', summary);
+        }
+        if (!Array.isArray(picks) || !picks.length) return;
+        for (const picked of picks) {
+          if (!Cesium.defined(picked)) continue;
+          const entity = picked.id || picked.primitive?.id || picked.primitive;
+          if (!entity) continue;
+          let alarmData = entity.alarmData
+            || entity?.properties?.alarmData?.getValue?.(Cesium.JulianDate.now())
+            || entity?.properties?.alarmData;
+          if (!alarmData && this.alarmEntityMap) {
+            const mapped = this.alarmEntityMap.get(entity);
+            if (mapped) {
+              alarmData = mapped;
+            }
+          }
+          if (alarmData) {
+            if (this.isPickDebugEnabled()) {
+              console.log('[AlarmPick] open from picked entity');
+            }
+            this.handleViewAlarmDetail(alarmData);
+            break;
+          }
+        }
+        if (!this.showAlarmDetail) {
+          const fallbackAlarm = this.findClosestAlarmByScreenPosition(pickPosition);
+          if (fallbackAlarm) {
+            if (this.isPickDebugEnabled()) {
+              console.log('[AlarmPick] open from fallback');
+            }
+            this.handleViewAlarmDetail(fallbackAlarm);
+          }
         }
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    },
+
+    isPickDebugEnabled() {
+      return typeof window !== 'undefined' && window.__DJI_DASHBOARD_PICK_DEBUG === true;
+    },
+
+    normalizePickPosition(position, Cesium) {
+      if (!position || !this.viewer || !Cesium?.Cartesian2) return position;
+      const canvas = this.viewer.scene?.canvas;
+      if (!canvas || typeof canvas.getBoundingClientRect !== 'function') return position;
+      const rect = canvas.getBoundingClientRect();
+      if (!rect || !rect.width || !rect.height) return position;
+      const scaleX = canvas.clientWidth / rect.width;
+      const scaleY = canvas.clientHeight / rect.height;
+      if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY)) return position;
+      if (scaleX === 1 && scaleY === 1) return position;
+      if (this.isPickDebugEnabled()) {
+        console.log('[AlarmPick] pick scale', { scaleX, scaleY, rect });
+      }
+      return new Cesium.Cartesian2(position.x * scaleX, position.y * scaleY);
+    },
+
+    findClosestAlarmByScreenPosition(position, thresholdPx = 18) {
+      if (!this.viewer || !position) return null;
+      const hasEntities = Array.isArray(this.alarmEntities) && this.alarmEntities.length > 0;
+      const hasAlarms = Array.isArray(this.alarms) && this.alarms.length > 0;
+      if (!hasEntities && !hasAlarms) return null;
+      const thresholdOverride = typeof window !== 'undefined'
+        ? Number(window.__DJI_DASHBOARD_PICK_THRESHOLD)
+        : NaN;
+      const effectiveThreshold = Number.isFinite(thresholdOverride)
+        ? thresholdOverride
+        : thresholdPx;
+      const Cesium = this.cesiumLib || window.Cesium;
+      const transforms = Cesium?.SceneTransforms;
+      const canWgs84ToWindow = typeof transforms?.wgs84ToWindowCoordinates === 'function';
+      const canWorldToWindow = typeof transforms?.worldToWindowCoordinates === 'function';
+      const canDrawingBuffer = typeof transforms?.wgs84ToDrawingBufferCoordinates === 'function';
+      const canCartesianToCanvas = typeof this.viewer?.scene?.cartesianToCanvasCoordinates === 'function';
+      if (!canWgs84ToWindow && !canWorldToWindow && !canDrawingBuffer && !canCartesianToCanvas) return null;
+      const toWindow = (cartesian) => {
+        if (!cartesian) return null;
+        if (canWorldToWindow) {
+          return transforms.worldToWindowCoordinates(this.viewer.scene, cartesian);
+        }
+        if (canCartesianToCanvas) {
+          return this.viewer.scene.cartesianToCanvasCoordinates(cartesian);
+        }
+        if (canWgs84ToWindow) {
+          return transforms.wgs84ToWindowCoordinates(this.viewer.scene, cartesian);
+        }
+        if (canDrawingBuffer) {
+          const bufferPos = transforms.wgs84ToDrawingBufferCoordinates(this.viewer.scene, cartesian);
+          if (bufferPos) {
+            const canvas = this.viewer.scene.canvas;
+            const scaleX = canvas.clientWidth / canvas.width;
+            const scaleY = canvas.clientHeight / canvas.height;
+            return { x: bufferPos.x * scaleX, y: bufferPos.y * scaleY };
+          }
+        }
+        return null;
+      };
+      let closest = null;
+      let minDistance = Number.POSITIVE_INFINITY;
+      if (hasEntities) {
+        for (const entity of this.alarmEntities) {
+          const cartesian = entity?.position?.getValue
+            ? entity.position.getValue(Cesium.JulianDate.now())
+            : entity?.position;
+          const windowPos = toWindow(cartesian);
+          if (!windowPos) continue;
+          const dx = windowPos.x - position.x;
+          const dy = windowPos.y - position.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closest = entity?.alarmData
+              || entity?.properties?.alarmData?.getValue?.(Cesium.JulianDate.now())
+              || entity?.properties?.alarmData
+              || (this.alarmEntityMap ? this.alarmEntityMap.get(entity) : null)
+              || null;
+          }
+        }
+      } else if (hasAlarms) {
+        for (const alarm of this.alarms) {
+          const { latitude, longitude, altitude } = this.getAlarmPosition(alarm);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+          const cartesian = Cesium.Cartesian3.fromDegrees(
+            longitude,
+            latitude,
+            Number.isFinite(altitude) ? altitude : 0
+          );
+          const windowPos = toWindow(cartesian);
+          if (!windowPos) continue;
+          const dx = windowPos.x - position.x;
+          const dy = windowPos.y - position.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closest = alarm;
+          }
+        }
+      }
+      if (this.isPickDebugEnabled()) {
+        console.log('[AlarmPick] fallback distance', {
+          minDistance,
+          threshold: effectiveThreshold,
+          usedEntities: hasEntities,
+          usedAlarms: hasAlarms
+        });
+      }
+      return minDistance <= effectiveThreshold ? closest : null;
     },
 
     toNumber(val) {

@@ -1,5 +1,6 @@
 <template>
-  <div class="home-dashboard">
+  <div class="home-dashboard-wrapper">
+    <div class="home-dashboard">
     <div class="dashboard-grid">
       <aside class="side-panel">
         <DashboardCard
@@ -305,6 +306,63 @@
       </aside>
     </div>
   </div>
+
+    <div v-if="showDockDetail" class="dock-modal-overlay" @click.self="closeDockDetail">
+    <div class="dock-modal-card">
+      <div class="dock-modal-header">
+        <div class="dock-modal-title">机场信息</div>
+        <button class="dock-modal-close" type="button" @click="closeDockDetail">×</button>
+      </div>
+      <div class="dock-modal-body" v-if="selectedDockInfo">
+        <div class="dock-detail-grid">
+          <div class="dock-detail-item">
+            <span class="label">机场名称</span>
+            <span class="value">{{ getDockDisplayName(selectedDockInfo) }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">机场 SN</span>
+            <span class="value">{{ selectedDockInfo.dock_sn || '--' }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">无人机 SN</span>
+            <span class="value">{{ selectedDockInfo.drone_sn || '--' }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">机场状态</span>
+            <span class="value">{{ selectedDockInfo.is_online ? '在线' : '离线' }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">无人机状态</span>
+            <span class="value">{{ getDroneInDockText(selectedDockInfo.drone_in_dock) }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">环境温度</span>
+            <span class="value">{{ formatTemperature(selectedDockInfo.environment_temperature) }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">当前风速</span>
+            <span class="value">{{ formatWindSpeed(selectedDockInfo.wind_speed) }}</span>
+          </div>
+          <div class="dock-detail-item">
+            <span class="label">剩余电量</span>
+            <span class="value">
+              {{ isDroneWorking(selectedDockInfo) ? '--' : formatBatteryPercent(selectedDockInfo.drone_battery_percent) }}
+            </span>
+          </div>
+          <div class="dock-detail-item full">
+            <span class="label">坐标</span>
+            <span class="value">
+              {{ formatCoordinate(selectedDockInfo.latitude) }}, {{ formatCoordinate(selectedDockInfo.longitude) }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="dock-modal-footer">
+        <button class="dock-modal-btn" type="button" @click="closeDockDetail">关闭</button>
+      </div>
+    </div>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -382,6 +440,8 @@ export default {
       safetyStats: { safetyDays: 0, todayAlarms: 0, monthAlarms: 0, yearAlarms: 0, latestAlarmAt: null },
       nowStampTimer: null,
       nowStamp: '',
+      showDockDetail: false,
+      selectedDockInfo: null,
       
       // 🔥 Cesium 实例
       cesiumViewer: null,
@@ -550,7 +610,8 @@ initCesiumMap() {
         if (!this.cesiumViewer || this.dockPickHandler) return
         this.dockPickHandler = new Cesium.ScreenSpaceEventHandler(this.cesiumViewer.scene.canvas)
         this.dockPickHandler.setInputAction(click => {
-          const picked = this.cesiumViewer.scene.pick(click.position)
+          const pickPosition = this.normalizePickPosition(click?.position)
+          const picked = this.cesiumViewer.scene.pick(pickPosition)
           if (Cesium.defined(picked) && picked.id && picked.id.dockData) {
             this.selectDockEntity(picked.id)
             return
@@ -558,11 +619,25 @@ initCesiumMap() {
           this.clearDockSelection()
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
       },
+      normalizePickPosition(position) {
+        if (!position || !this.cesiumViewer || !Cesium?.Cartesian2) return position
+        const canvas = this.cesiumViewer.scene?.canvas
+        if (!canvas || typeof canvas.getBoundingClientRect !== 'function') return position
+        const rect = canvas.getBoundingClientRect()
+        if (!rect || !rect.width || !rect.height) return position
+        const scaleX = canvas.clientWidth / rect.width
+        const scaleY = canvas.clientHeight / rect.height
+        if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY)) return position
+        if (scaleX === 1 && scaleY === 1) return position
+        return new Cesium.Cartesian2(position.x * scaleX, position.y * scaleY)
+      },
       clearDockSelection() {
         if (this.selectedDockEntity && this.selectedDockEntity.label) {
           this.selectedDockEntity.label.show = false
         }
         this.selectedDockEntity = null
+        this.showDockDetail = false
+        this.selectedDockInfo = null
       },
       selectDockEntity(entity) {
         if (!entity || !entity.label) {
@@ -573,7 +648,13 @@ initCesiumMap() {
           this.selectedDockEntity.label.show = false
         }
         this.selectedDockEntity = entity
-        this.selectedDockEntity.label.show = true
+        this.selectedDockEntity.label.show = false
+        this.selectedDockInfo = entity.dockData || null
+        this.showDockDetail = true
+      },
+      closeDockDetail() {
+        this.showDockDetail = false
+        this.selectedDockInfo = null
       },
       clearDockMarkers() {
         if (!this.cesiumViewer || !this.dockEntities.length) {
@@ -933,6 +1014,10 @@ initCesiumMap() {
     formatWindSpeed(speed) {
       return speed !== null && speed !== undefined ? `${speed} m/s` : '--'
     },
+    formatCoordinate(value) {
+      const num = Number(value)
+      return Number.isFinite(num) ? num.toFixed(6) : '--'
+    },
     formatMetric(value, unit) {
       if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) {
         return unit ? `--${unit}` : '--'
@@ -1047,6 +1132,13 @@ initCesiumMap() {
 /* 保持原有的大部分样式，只修改地图相关部分 */
 
 .home-dashboard {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-dashboard-wrapper {
   width: 100%;
   height: 100%;
   display: flex;
@@ -1943,6 +2035,130 @@ initCesiumMap() {
 }
 .highlight {
   color: #fbbf24 !important;
+}
+
+.dock-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 28, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 2000;
+}
+
+.dock-modal-card {
+  width: min(520px, 92vw);
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.6);
+  overflow: hidden;
+  animation: dockModalIn 0.25s ease;
+}
+
+@keyframes dockModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dock-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(30, 64, 175, 0.25));
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.dock-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e0f2fe;
+}
+
+.dock-modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dock-modal-close:hover {
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #7dd3fc;
+}
+
+.dock-modal-body {
+  padding: 18px 20px 8px;
+}
+
+.dock-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+
+.dock-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dock-detail-item.full {
+  grid-column: 1 / -1;
+}
+
+.dock-detail-item .label {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.dock-detail-item .value {
+  font-size: 14px;
+  color: #f8fafc;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 20px 18px;
+}
+
+.dock-modal-btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(30, 64, 175, 0.25);
+  color: #e0f2fe;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dock-modal-btn:hover {
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #7dd3fc;
 }
 
 @media (max-width: 1280px) {
