@@ -913,7 +913,7 @@ export default {
     },
     async loadAlarms() {
       // 增大 page_size 以获取更多异常图片，实现“轮播所有”
-      const params = { page_size: 500, ordering: '-created_at' }
+      const params = { page_size: 50, ordering: '-created_at' }
       if (this.selectedWayline) {
         params.wayline_id = this.selectedWayline
       }

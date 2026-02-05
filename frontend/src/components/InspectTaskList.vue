@@ -72,8 +72,7 @@
       <table v-else class="task-table">
         <thead>
           <tr>
-            <th width="6%">ID</th>
-            <th width="18%">外部任务ID</th>
+            <th width="24%">巡检任务名</th>
             <th width="10%">执行设备</th> <!-- 🔥 新增列 -->
             <!-- 🔥 选了检测类型时显示航线和检测类型列 -->
             <th v-if="categoryFilter" width="14%">航线名称</th>
@@ -86,12 +85,9 @@
         </thead>
         <tbody>
           <tr v-if="filteredTasks.length === 0">
-            <td :colspan="categoryFilter ? 9 : 7" class="empty-row">暂无任务数据</td>
+            <td :colspan="categoryFilter ? 8 : 6" class="empty-row">暂无任务数据</td>
           </tr>
           <tr v-for="task in filteredTasks" :key="task.id" class="task-row">
-            <td>
-              <span class="id-badge">{{ task.id }}</span>
-            </td>
             <td>
               <!-- 🔥 修复：父任务显示external_task_id，子任务显示dji_task_name -->
               <span class="task-name" :title="task.external_task_id">
@@ -199,7 +195,7 @@
                 <span class="detail-value">{{ currentTask?.id }}</span>
               </div>
               <div class="detail-item">
-                <span class="detail-label">外部任务ID</span>
+                <span class="detail-label">巡检任务名</span>
                 <span class="detail-value">{{ currentTask?.external_task_id || '--' }}</span>
               </div>
               <div class="detail-item">
