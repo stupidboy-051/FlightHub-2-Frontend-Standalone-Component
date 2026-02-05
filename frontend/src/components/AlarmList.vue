@@ -61,8 +61,18 @@
         </div>
       </div>
 
-      <button @click="clearAllAlarms" class="action-btn delete-btn clear-all-btn">
-        清空记录
+      <!-- 日期筛选 -->
+      <div class="date-picker-wrapper">
+        <input 
+          type="date" 
+          v-model="dateFilter"
+          @change="handleDateChange"
+          class="date-input"
+        />
+      </div>
+
+      <button @click="resetFilters" class="action-btn view-btn clear-all-btn">
+        重置筛选
       </button>
     </div>
     
@@ -299,6 +309,7 @@ export default {
       statusFilter: '',
       detectTypeFilter: '',
       waylineIdFilter: '',
+      dateFilter: '', // 新增日期筛选
       loading: false,
       currentPage: 1,
       pageSize: 10,
@@ -372,6 +383,19 @@ export default {
       this.currentPage = 1
       this.loadAlarms()
     },
+    handleDateChange() {
+      this.currentPage = 1
+      this.loadAlarms()
+    },
+    resetFilters() {
+      this.searchQuery = ''
+      this.statusFilter = ''
+      this.detectTypeFilter = ''
+      this.waylineIdFilter = ''
+      this.dateFilter = ''
+      this.currentPage = 1
+      this.loadAlarms()
+    },
     // 下拉框控制方法
     toggleDropdown(type) {
       if (this.activeDropdown === type) {
@@ -433,6 +457,14 @@ export default {
         if (this.detectTypeFilter) params.detect_type = this.detectTypeFilter
         if (this.waylineIdFilter) params.wayline_id = this.waylineIdFilter
         
+        // 处理日期筛选
+        if (this.dateFilter) {
+          const start = new Date(this.dateFilter + 'T00:00:00')
+          const end = new Date(this.dateFilter + 'T23:59:59.999')
+          params.start_date = start.toISOString()
+          params.end_date = end.toISOString()
+        }
+
         const response = await alarmApi.getAlarms(params)
         const list = response.results || response
         // 处理图片URL和分类名称
@@ -642,6 +674,34 @@ export default {
 }
 
 .filter-select:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+}
+
+/* 日期选择器样式 */
+.date-picker-wrapper {
+  position: relative;
+  min-width: 160px;
+}
+
+.date-input {
+  width: 100%;
+  padding: 10px 16px; /* 调整padding以匹配高度 */
+  background: rgba(10, 14, 39, 0.6);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 10px;
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color-scheme: dark; /* 让下拉日历变黑 */
+  box-sizing: border-box;
+  height: 42px; /* 固定高度与下拉框一致 */
+}
+
+.date-input:focus {
   border-color: #ef4444;
   box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
 }
@@ -961,13 +1021,15 @@ export default {
   margin-left: auto;
   padding: 8px 16px;
   font-weight: 600;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.15);
+  /* 使用 view-btn 的蓝色系样式，覆盖原本 delete-btn 的红色系 */
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #3b82f6;
 }
 
 .clear-all-btn:hover {
-  background: rgba(239, 68, 68, 0.3);
-  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+  background: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
 }
 
 /* 分页器 - 复用UserManagement样式 */
