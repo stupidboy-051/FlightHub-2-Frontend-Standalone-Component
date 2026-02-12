@@ -589,17 +589,28 @@ export default {
 
     const confirmManualDetect = async () => {
       try {
-        await inspectTaskApi.startManualTask({
+        const res = await inspectTaskApi.startManualTask({
           source: 'web_manual',
           folder_path: manualDetectForm.value.folderPath,
           detect_type: manualDetectForm.value.detectType,
           task_name: manualDetectForm.value.taskName
         })
-        ElMessage.success('手动检测指令已发送')
+
+        if (res && typeof res.code !== 'undefined' && res.code !== 0) {
+          throw new Error(res.msg || '发送失败')
+        }
+
+        const newImagesCount = Number(res?.new_images_count ?? 0)
+        if (Number.isFinite(newImagesCount) && newImagesCount > 0) {
+          ElMessage.success(`${res?.msg || '手动检测已启动'}（已同步 ${newImagesCount} 张图片并开始检测）`)
+        } else {
+          ElMessage.warning(`${res?.msg || '手动检测已启动'}（该路径下暂未发现图片）`)
+        }
         manualDetectVisible.value = false
       } catch (error) {
         console.error('手动检测失败:', error)
-        ElMessage.error('发送失败，请检查后端服务')
+        const msg = error?.response?.data?.msg || error?.message || '发送失败，请检查后端服务'
+        ElMessage.error(msg)
       }
     }
 

@@ -681,7 +681,8 @@ export default {
 /* 日期选择器样式 */
 .date-picker-wrapper {
   position: relative;
-  min-width: 160px;
+  min-width: 200px;
+  flex: 1;
 }
 
 .date-input {
@@ -709,14 +710,17 @@ export default {
 /* 自定义下拉框样式 */
 .custom-select-wrapper {
   position: relative;
-  min-width: 240px;
+  min-width: 200px;
+  flex: 1;
 }
 
 .custom-select-trigger {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 0 16px;
+  height: 42px;
+  box-sizing: border-box;
   background: rgba(10, 14, 39, 0.6);
   border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: 10px;

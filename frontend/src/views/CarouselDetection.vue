@@ -1985,13 +1985,9 @@ export default {
 
 <style scoped>
 .carousel-detection-page {
-  position: absolute;
-  top: -24px;
-  bottom: -24px;
-  left: -24px;
-  right: -24px;
+  height: 100%;
   background: #0b1224;
-  padding: 40px 24px 0;
+  padding: 24px;
   color: #e2e8f0;
   display: flex;
   flex-direction: column;

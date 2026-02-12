@@ -158,6 +158,21 @@ FASTAPI_DETECT_URL = os.getenv(
     "http://localhost:8088/detect"
 )
 
+_ENABLE_AUTO_TRIGGER_DETECT_ENV = os.getenv("ENABLE_AUTO_TRIGGER_DETECT", "1").lower()
+ENABLE_AUTO_TRIGGER_DETECT = _ENABLE_AUTO_TRIGGER_DETECT_ENV not in ("0", "false", "no", "off")
+DETECT_DISTRIBUTION_BATCH_SIZE = int(os.getenv("DETECT_DISTRIBUTION_BATCH_SIZE", "50"))
+DETECT_WORKER_IDLE_SLEEP = float(os.getenv("DETECT_WORKER_IDLE_SLEEP", "2"))
+DETECT_HTTP_TIMEOUT = int(os.getenv("DETECT_HTTP_TIMEOUT", "180"))
+
+REDIS_URL = os.getenv("REDIS_URL")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+
 
 # settings.py (添加到文件末尾)
 

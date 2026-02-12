@@ -173,8 +173,12 @@ def calculate_drone_gps(target_time_utc):
         dji_alt = float(payload.get("measure_target_altitude", -9999)) # 目标海拔
         error_state = int(payload.get("measure_target_error_state", 1))
 
+        # 打印基础信息用于调试
+        print(f"🔍 [GPS Calc] Base Info: Pitch={pitch:.1f}, Yaw={yaw:.1f}, H={height:.1f}, ErrState={error_state}")
+
         # --- 策略 A: 硬件测距 ---
         if error_state == 0 and dji_lat != 0:
+            print(f"   🎯 [Strategy A] 硬件测距有效: Lat={dji_lat}, Lon={dji_lon}")
             return {
                 "lat": dji_lat, 
                 "lon": dji_lon, 
@@ -194,6 +198,7 @@ def calculate_drone_gps(target_time_utc):
             calc_distance = height / math.tan(angle_rad)
             if calc_distance > 500: calc_distance = 500
             method_tag = "TRIG_CALC"
+            print(f"   📐 [Strategy B] 几何推算: Pitch={pitch:.1f} <= -10 -> Dist={calc_distance:.1f}m")
         else:
             # 策略 C: 平视兜底
             # 动态调整：如果无人机飞得很低(比如10米)，只看前方20米
@@ -202,6 +207,7 @@ def calculate_drone_gps(target_time_utc):
             else:
                 calc_distance = 80.0
             method_tag = "FIXED_ESTIMATE"
+            print(f"   🔭 [Strategy C] 平视兜底: Pitch={pitch:.1f} > -10, Height={height:.1f} -> Dist={calc_distance:.1f}m")
             
         # --- 坐标投影 ---
         yaw_rad = math.radians(yaw)
@@ -678,10 +684,11 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
     detect_start_time = time.time()
 
     try:
-        # 🔥 修复 5：增加超时时间到 600 秒（10分钟），适应 GLM-4V 模型处理速度
+        # 🔥 修复 5：设置超时时间（默认 180 秒），适应 GLM-4V 模型处理速度
         # GLM-4V 等大模型处理图片通常需要 1-2 分钟，极端情况可能更长
         req_start = time.time()
-        resp = requests.post(detect_url, json=payload, timeout=600)
+        detect_timeout = int(getattr(settings, "DETECT_HTTP_TIMEOUT", 180))
+        resp = requests.post(detect_url, json=payload, timeout=detect_timeout)
         http_cost = time.time() - req_start
 
         # 🔥 性能监控：记录耗时
@@ -743,11 +750,13 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
         # 🔥 修复 4：添加重试机制
         if img.retry_count < img.max_retries:
             img.retry_count += 1
-            # 💡 增加冷却时间，避免立即重试再次超时
-            print(f"💤 [Detect] 图片 {img.id} 进入冷却 (30秒) 后重试...")
-            time.sleep(30)
+            retry_delay_seconds = 30
+            from django.core.cache import cache
+            next_retry_at = time.time() + retry_delay_seconds
+            cache.set(f"detect_retry_at:{img.id}", next_retry_at, timeout=3600)
+            print(f"💤 [Detect] 图片 {img.id} 已设置冷却 ({retry_delay_seconds}秒) 后重试...")
             img.detect_status = "pending"  # 重新入队
-            print(f"🔄 [Detect] 图片 {img.id} 冷却结束，准备重试 ({img.retry_count}/{img.max_retries})")
+            print(f"🔄 [Detect] 图片 {img.id} 已安排稍后重试 ({img.retry_count}/{img.max_retries})")
         else:
             img.detect_status = "failed"
             print(f"❌ [Detect] 图片 {img.id} 检测超时，达到最大重试次数 ({img.max_retries})")
@@ -793,6 +802,9 @@ def auto_trigger_detect(task):
     [异步非阻塞版] 自动检测调度器
     只负责将任务分发给全局线程池，不再同步等待结果。
     """
+    if not getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+        return
+
     # 🔥 使用任务级别的锁防止并发启动 (依然需要，防止重复提交同一批图片)
     lock_key = f"detect_task_{task.id}"
     from django.core.cache import cache
@@ -805,23 +817,41 @@ def auto_trigger_detect(task):
         return
 
     try:
-        # 🔥 查询所有 pending 状态的图片
-        images = task.images.filter(detect_status="pending").order_by("id")
-        
-        # 如果没有图片，直接退出
-        if not images.exists():
+        batch_size = int(getattr(settings, "DETECT_DISTRIBUTION_BATCH_SIZE", 50))
+        if batch_size <= 0:
             return
 
-        # 🔥 原子操作：立即将这些图片标记为 processing
-        # 这样 Poller 下一轮扫描时就不会再扫到它们了
-        updated_count = images.update(detect_status="processing")
+        pending_ids = list(
+            task.images.filter(detect_status="pending")
+            .order_by("id")
+            .values_list("id", flat=True)[:batch_size]
+        )
+
+        if not pending_ids:
+            return
+
+        now_ts = time.time()
+        retry_at_map = cache.get_many([f"detect_retry_at:{img_id}" for img_id in pending_ids])
+        eligible_ids = []
+        for img_id in pending_ids:
+            retry_at = retry_at_map.get(f"detect_retry_at:{img_id}")
+            if retry_at is None or float(retry_at) <= now_ts:
+                eligible_ids.append(img_id)
+
+        if not eligible_ids:
+            return
+
+        updated_count = task.images.filter(
+            id__in=eligible_ids,
+            detect_status="pending",
+        ).update(detect_status="processing")
         
         if updated_count > 0:
             print(f"🚀 [Async] 任务 {task.id} 将 {updated_count} 张图片提交至后台队列...")
             
             # 重新获取对象（为了拿到更新后的状态，虽非必须但更稳妥）
             # 注意：这里不能复用上面的 images queryset，因为 update 后缓存可能失效
-            processing_images = task.images.filter(detect_status="processing")
+            processing_images = task.images.filter(id__in=eligible_ids, detect_status="processing").order_by("id")
             
             # 🔥 仅首次更新任务开始时间
             if not task.started_at:
@@ -1161,7 +1191,8 @@ def minio_poller_worker():
                     if processing_count == 0:  # 没有正在处理的图片
                         print(f"🚀 [Poller] 任务 {task.external_task_id} 有 {pending_count} 张待检测图片，触发检测...")
                         # 触发算法检测
-                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                        if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                            threading.Thread(target=auto_trigger_detect, args=(task,)).start()
                     else:
                         print(f"⏳ [Poller] 任务 {task.external_task_id} 有 {processing_count} 张图片正在检测中，跳过重复启动")
 
@@ -1280,7 +1311,8 @@ def minio_poller_worker():
 
                     if processing_count == 0:
                         print(f"🚀 [Fixed Folder] 任务 {task_id} 有 {pending_count} 张待检测图片，触发检测...")
-                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                        if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                            threading.Thread(target=auto_trigger_detect, args=(task,)).start()
                     else:
                         print(f"⏳ [Fixed Folder] 任务 {task_id} 有 {processing_count} 张图片正在检测中，跳过重复启动")
 
@@ -1445,7 +1477,8 @@ def minio_poller_worker1231():
 
                 if pending_cnt > 0:
                     print(f"🔄 [Poller] 任务 {task.external_task_id} 有 {pending_cnt} 张待检测图片，触发检测...")
-                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                    if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
                 else:
                     # 🔥 3. 没有pending图片，检查是否还有processing状态的图片
                     processing_cnt = InspectImage.objects.filter(
@@ -1546,7 +1579,8 @@ def process_video_task(task, s3_client, bucket, video_key):
         if saved_count > 0:
             new_cnt = sync_images_core(task)
             if new_cnt > 0:
-                threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
 
     except Exception as e:
         print(f"❌ [Video] 处理异常: {e}")
@@ -1950,14 +1984,16 @@ def minio_poller_worker2():
 
                         # 3. 自动触发检测 (对新图片)
                         #    注意：auto_trigger_detect 内部会找 pending 的图片进行检测
-                        threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
+                        if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                            threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
                     else:
                         # 🔥 修复：即使没有新图片，也要检查是否有挂起的任务需要处理
                         # 避免因为 sync_images_core 返回 0 而导致之前的 pending 图片卡死
                         pending_count = target_task.images.filter(detect_status="pending").count()
                         if pending_count > 0:
                              # 为了避免日志刷屏，可以只在真的触发时打印
-                             threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
+                             if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                                 threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
 
             # =========================================================
             # 第四步：全局超时判断 (处理无人机充电/结束的情况)
@@ -2065,7 +2101,8 @@ def minio_poller_worker1():
                 if new_images_count > 0:
                     # A. 有新图 -> 触发检测 -> 检测函数会在跑完后把状态改为 done
                     print(f"🚀 [Poller] 任务 {task.external_task_id} 发现 {new_images_count} 张新图，触发检测...")
-                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                    if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
                 else:
                     # B. 无新图 -> 检查是否还有残留的 pending/processing 图片
                     # 如果所有图片都跑完了，且刚才没扫到新图，说明任务彻底结束了
@@ -2170,6 +2207,8 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
         task = self.get_object()
         if task.detect_status == "processing":
             return Response({"detail": "Processing..."}, status=400)
+        if not getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+            return Response({"detail": "Auto trigger disabled."}, status=400)
         threading.Thread(target=auto_trigger_detect, args=(task,)).start()
         return Response({"detail": "Detection started."})
 
@@ -3145,7 +3184,8 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                         break
 
                     # 异步触发检测
-                    threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
+                    if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                        threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
                 else:
                     # 流还没推上来，等待
                     if not first_frame_captured:
@@ -3542,7 +3582,8 @@ def start_manual_task(request):
         # 4. 异步触发图片同步和检测
         # 注意：这里我们手动调用 sync_images_core 来立即响应
         # 但为了不阻塞，建议还是依赖后台轮询，或者用线程
-        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+        if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+            threading.Thread(target=auto_trigger_detect, args=(task,)).start()
         
         return JsonResponse({
             "code": 0, 
@@ -3726,7 +3767,8 @@ def start_selected_tasks(request):
                 # 10. 启动检测
                 if task.images.filter(detect_status='pending').exists():
                     print(f"🚀 [Start] 启动检测线程")
-                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                    if getattr(settings, "ENABLE_AUTO_TRIGGER_DETECT", True):
+                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
                 else:
                     print(f"⚠️ [Start] 没有待检测图片，跳过检测")
                 
@@ -4094,6 +4136,25 @@ class WaylineFingerprintManager:
                                 # 2. 查找该航点下的所有 Action
                                 action_group = pm.find(".//wpml:actionGroup", ns) or pm.find(".//{http://www.dji.com/wpmz/1.0.0}actionGroup") or find_local_first(pm, "actionGroup")
                                 
+                                # 🔥 [新功能] 保护区航线：无论有没有动作，把航点本身也作为详情存入
+                                is_protected_wayline = False
+                                if category_obj:
+                                    cat_code = str(getattr(category_obj, 'code', '')).lower()
+                                    if 'protected' in cat_code or '保护区' in cat_code:
+                                        is_protected_wayline = True
+                                        
+                                if is_protected_wayline:
+                                    pt_detail = {
+                                        "uuid": f"virtual_point_{idx}",
+                                        "lat": lat,
+                                        "lon": lon,
+                                        "height": final_height,
+                                        "ellipsoid_height": float(ellipsoid_height) if ellipsoid_height else None,
+                                        "gimbal_yaw": 0.0,
+                                        "aircraft_heading": 0.0
+                                    }
+                                    action_details_list.append(pt_detail)
+
                                 if action_group:
                                     actions = find_all(action_group, 'action') or find_local_all(action_group, 'action')
                                     actions_total += len(actions)
@@ -4104,11 +4165,19 @@ class WaylineFingerprintManager:
                                         
                                         if actuator_param:
                                             # 提取 UUID
+                                            uuid = None
                                             uuid_node = actuator_param.find("wpml:actionUUID", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}actionUUID") or find_local_first(actuator_param, "actionUUID")
                                             if uuid_node is not None and uuid_node.text:
                                                 uuid = uuid_node.text
                                                 uuid_set.add(uuid)
-                                                
+                                            
+                                            # 如果没有 UUID，且是保护区航线，生成虚拟 UUID
+                                            if not uuid and is_protected_wayline:
+                                                func_node = action.find("wpml:actionActuatorFunc", ns) or action.find("{http://www.dji.com/wpmz/1.0.0}actionActuatorFunc") or find_local_first(action, "actionActuatorFunc")
+                                                func_name = func_node.text if func_node is not None else "action"
+                                                uuid = f"virtual_{func_name}_{idx}_{actions.index(action)}"
+
+                                            if uuid:
                                                 # 提取 Yaw
                                                 yaw_node = actuator_param.find("wpml:gimbalYawRotateAngle", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}gimbalYawRotateAngle") or find_local_first(actuator_param, "gimbalYawRotateAngle")
                                                 gimbal_yaw = float(yaw_node.text) if yaw_node is not None else 0.0
@@ -4116,7 +4185,7 @@ class WaylineFingerprintManager:
                                                 # 提取 Aircraft Heading (如果有)
                                                 heading_node = actuator_param.find("wpml:aircraftHeading", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}aircraftHeading") or find_local_first(actuator_param, "aircraftHeading")
                                                 aircraft_heading = float(heading_node.text) if heading_node is not None else 0.0
-
+                                                
                                                 # 组装详细信息
                                                 detail = {
                                                     "uuid": uuid,
@@ -4129,7 +4198,8 @@ class WaylineFingerprintManager:
                                                 }
                                                 action_details_list.append(detail)
                                 else:
-                                    print(f"      ⚠️ Placemark#{idx} 未找到 actionGroup")
+                                    # print(f"      ⚠️ Placemark#{idx} 未找到 actionGroup")
+                                    pass
                             
                             print(f"      📊 解析统计: UUID={len(uuid_set)}, Placemark={len(placemarks)}, Actions={actions_total}, 详情={len(action_details_list)}")
                             
@@ -4173,22 +4243,35 @@ class WaylineFingerprintManager:
                                         else:
                                             uuid_nodes = []
                                         
-                                        mapped_coords = coords_list[sel_idx] if (sel_idx is not None and 0 <= sel_idx < len(coords_list)) else None
-                                        
+                                    mapped_coords = coords_list[sel_idx] if (sel_idx is not None and 0 <= sel_idx < len(coords_list)) else None
+                                    
+                                    # 🔥 [新功能] 全局解析 - 保护区航线：无论有没有动作，把航点本身也作为详情存入
+                                    is_protected_wayline = False
+                                    if category_obj:
+                                        cat_code = str(getattr(category_obj, 'code', '')).lower()
+                                        if 'protected' in cat_code or '保护区' in cat_code:
+                                            is_protected_wayline = True
+                                            
+                                    if is_protected_wayline and mapped_coords:
+                                        pt_detail = {
+                                            "uuid": f"virtual_g_point_{g_idx}",
+                                            "lat": mapped_coords[0],
+                                            "lon": mapped_coords[1],
+                                            "height": mapped_coords[2],
+                                            "ellipsoid_height": mapped_coords[3],
+                                            "gimbal_yaw": 0.0,
+                                            "aircraft_heading": 0.0
+                                        }
+                                        action_details_list.append(pt_detail)
+
+                                    if len(actions) > 0:
                                         # 1) 遍历标准 action 节点
                                         for action in actions:
+                                            # print(f"      🔍 [Debug] Action Loop 1 (Placemark): Tag={action.tag}")
                                             actuator_param = action.find(".//wpml:actionActuatorFuncParam", ns) or action.find(".//{http://www.dji.com/wpmz/1.0.0}actionActuatorFuncParam")
                                             if actuator_param is None:
+                                                # print(f"      ⚠️ [Debug] Action Loop 1: actuator_param is None! Child tags: {[c.tag for c in action]}")
                                                 continue
-                                            
-                                            # 判断是否是保护区航线 (允许无 UUID 提取坐标)
-                                            is_protected_wayline = False
-                                            if category_obj:
-                                                cat_code = str(getattr(category_obj, 'code', '')).lower()
-                                                if 'protected' in cat_code or '保护区' in cat_code:
-                                                    is_protected_wayline = True
-                                            
-                                            print(f"      🔍 [Debug] Check Action: is_protected={is_protected_wayline}, cat_code={getattr(category_obj, 'code', 'None')}")
                                             
                                             uuid = None
                                             uuid_node = actuator_param.find("wpml:actionUUID", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}actionUUID")
@@ -4196,7 +4279,7 @@ class WaylineFingerprintManager:
                                             if uuid_node is not None and uuid_node.text:
                                                 uuid = uuid_node.text
                                                 uuid_set.add(uuid) # 只有真实 UUID 才加入匹配集合
-                                                print(f"      ✅ [Debug] Found Real UUID: {uuid}")
+                                                # print(f"      ✅ [Debug] Found Real UUID: {uuid}")
                                             
                                             # 如果没有 UUID，且是保护区航线，生成虚拟 UUID 用于绘图
                                             if not uuid and is_protected_wayline:
@@ -4204,10 +4287,10 @@ class WaylineFingerprintManager:
                                                 func_name = func_node.text if func_node is not None else "action"
                                                 # 使用索引生成唯一标识
                                                 uuid = f"virtual_{func_name}_{g_idx}_{actions.index(action)}"
-                                                print(f"      🔧 [Debug] Generated Virtual UUID: {uuid}")
+                                                # print(f"      🔧 [Debug] Generated Virtual UUID: {uuid}")
                                             
                                             if not uuid:
-                                                print(f"      ⚠️ [Debug] Skip Action (No UUID)")
+                                                # print(f"      ⚠️ [Debug] Skip Action (No UUID)")
                                                 continue
 
                                             yaw_node = actuator_param.find("wpml:gimbalYawRotateAngle", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}gimbalYawRotateAngle")
@@ -4230,9 +4313,11 @@ class WaylineFingerprintManager:
                                         # 2) 兼容遍历直接 UUID 节点
                                         for uuid_node in uuid_nodes:
                                             if not uuid_node.text:
+                                                print(f"      ⚠️ [Debug] UUID Node Loop: Empty text")
                                                 continue
                                             uuid = uuid_node.text
                                             uuid_set.add(uuid)
+                                            print(f"      ✅ [Debug] UUID Node Found: {uuid}")
                                             detail = {
                                                 "uuid": uuid,
                                                 "lat": mapped_coords[0] if mapped_coords else None,
@@ -4847,5 +4932,3 @@ class InspectImageViewSet(viewsets.ModelViewSet):
             ])
             
         return response
-
-

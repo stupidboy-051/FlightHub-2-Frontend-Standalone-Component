@@ -263,6 +263,11 @@ class InspectImage(models.Model):
                                      verbose_name="检测状态")
     result = models.JSONField(null=True, blank=True, verbose_name="检测结果")
 
+    latitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True, verbose_name="纬度")
+    longitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True, verbose_name="经度")
+    high = models.FloatField(null=True, blank=True, verbose_name="高度（米）")
+    geo_method = models.CharField(max_length=50, null=True, blank=True, verbose_name="坐标来源方法")
+
     # 🔥 新增：重试次数字段，用于失败重试机制
     retry_count = models.IntegerField(default=0, verbose_name="重试次数")
     max_retries = 3  # 最大重试次数（类常量）
@@ -275,6 +280,8 @@ class InspectImage(models.Model):
         verbose_name_plural = "巡检图片"
         indexes = [
             models.Index(fields=['inspect_task', 'created_at']),
+             models.Index(fields=['inspect_task', 'detect_status'], name='insimg_task_status_idx'),
+            models.Index(fields=['inspect_task', 'object_key'], name='insimg_task_objkey_idx'),
         ]
 
 
@@ -574,4 +581,3 @@ class SuspiciousImage(models.Model):
 
     def __str__(self):
         return f"Suspicious {self.id} - {self.status}"
-
