@@ -441,6 +441,10 @@ class FlightTaskInfo(models.Model):
 
     # 状态字段，可以记录任务的执行状态
     status = models.CharField(max_length=50, default="created", verbose_name="任务状态")
+
+    # 任务飞行统计
+    flight_duration = models.IntegerField(default=0, verbose_name="飞行时长(秒)")
+    flight_distance = models.FloatField(default=0.0, verbose_name="飞行里程(km)")
     
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")

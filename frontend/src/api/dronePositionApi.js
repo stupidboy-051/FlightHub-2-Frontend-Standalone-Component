@@ -35,5 +35,13 @@ export default {
       console.error('Failed to fetch drone positions:', error)
       throw error
     }
+  },
+  async getLatestByDevice() {
+    try {
+      return await api.get('/drone-positions/latest_by_device/')
+    } catch (error) {
+      console.error('Failed to fetch latest drone positions:', error)
+      throw error
+    }
   }
 }

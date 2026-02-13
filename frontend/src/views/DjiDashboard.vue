@@ -78,7 +78,7 @@
 
               <div class="dock-latest">
                 <div class="dock-latest-header">
-                  <span class="dock-latest-title">最新位置</span>
+                  <span class="dock-latest-title">{{ isDroneWorking(selectedDock) ? '飞行统计' : '最新位置' }}</span>
                   <div class="dock-latest-tags" v-if="selectedDock">
                     <span v-if="selectedDock?.drone_sn" class="dock-latest-sn">{{ selectedDock.drone_sn }}</span>
                     <span class="dock-latest-state" :class="{ working: isDroneWorking(selectedDock) }">
@@ -88,6 +88,18 @@
                 </div>
                 <div v-if="!selectedDock" class="panel-placeholder small">请选择机场</div>
                 <div v-else-if="!selectedDock.drone_sn" class="panel-placeholder small">该机场未绑定无人机</div>
+                <div v-else-if="isDroneWorking(selectedDock)" class="position-list">
+                  <div class="position-item">
+                    <div class="position-row">
+                      <span class="position-label">飞行时长</span>
+                      <span class="position-value">{{ formatFlightDuration() }}</span>
+                    </div>
+                    <div class="position-row">
+                      <span class="position-label">飞行里程</span>
+                      <span class="position-value">{{ formatFlightDistance() }}</span>
+                    </div>
+                  </div>
+                </div>
                 <div v-else-if="positionLoading && latestPositions.length === 0" class="panel-placeholder small">读取中...</div>
                 <div v-else-if="latestPositions.length === 0" class="panel-placeholder small">暂无位置数据</div>
                 <div v-else class="position-list">
@@ -101,8 +113,12 @@
                       <span class="position-value">{{ formatPositionTime(pos.timestamp || pos.created_at) }}</span>
                     </div>
                     <div class="position-row">
-                      <span class="position-label">坐标</span>
-                      <span class="position-value">{{ formatPositionCoords(pos) }}</span>
+                      <span class="position-label">飞行时长</span>
+                      <span class="position-value">{{ formatFlightDuration() }}</span>
+                    </div>
+                    <div class="position-row">
+                      <span class="position-label">飞行里程</span>
+                      <span class="position-value">{{ formatFlightDistance() }}</span>
                     </div>
                     <div class="position-row">
                       <span class="position-label">高度</span>
@@ -422,7 +438,7 @@ export default {
       loading: false,
       error: '',
       globeVisible: true,
-      cameraMode: 'third',
+      cameraMode: '',
       imageryProviderType: 'aerial',
       fh2Loaded: false,
       selectedWayline: null,
@@ -466,6 +482,18 @@ export default {
       lastDroneTimestamp: null,
       lastDroneHeading: null,
       lastDronePosition: null,
+      flightStartTimestamp: null,
+      flightDurationMs: 0,
+      flightDistanceKm: 0,
+      flightLastPosition: null,
+      flightLastUpdateTimestamp: null,
+      flightStatsTaskUuid: '',
+      flightStatsSaving: false,
+      flightStatsSavedTaskUuid: '',
+      flightStatsByDock: {},
+      flightStatsPollTimer: null,
+      flightStatsPollInFlight: false,
+      flightStatsPollQueued: false,
       currentWaylineUuid: '',
       lastTaskInfoAttempt: 0,
       lastTaskInfoSn: '',
@@ -516,10 +544,58 @@ export default {
       return '暂无告警信息'
     }
   },
+  watch: {
+    selectedDock: {
+      handler(newDock, oldDock) {
+        if (!newDock || !oldDock) return
+        const newKey = newDock.dock_sn || newDock.id
+        const oldKey = oldDock.dock_sn || oldDock.id
+        if (!newKey || newKey !== oldKey) return
+        const wasInDock = oldDock.drone_in_dock === 1 || oldDock.drone_in_dock === '1'
+        const nowWorking = newDock.drone_in_dock === 0 || newDock.drone_in_dock === '0'
+        if (wasInDock && nowWorking) {
+          this.resetFlightStats(newDock)
+          this.autoStartThirdPersonForTaskDock(newDock)
+          if (this.currentMode === 'monitor') {
+            const dockSn = newDock.dock_sn
+            if (!dockSn) return
+            this.lastTaskInfoSn = dockSn
+            this.lastTaskInfoAttempt = Date.now()
+            void this.syncWaylineFromTaskInfo(dockSn)
+          }
+        }
+        const wasWorking = oldDock.drone_in_dock === 0 || oldDock.drone_in_dock === '0'
+        const nowInDock = newDock.drone_in_dock === 1 || newDock.drone_in_dock === '1'
+        if (wasWorking && nowInDock) {
+          const finalize = this.finalizeFlightStats(newDock)
+          if (finalize && typeof finalize.then === 'function') {
+            finalize.then(success => {
+              if (success) this.resetFlightStats(newDock)
+            })
+          }
+        }
+      }
+    },
+    currentTaskUuid(newVal, oldVal) {
+      if (!newVal || newVal === oldVal) return
+      const dock = this.selectedDock
+      if (this.flightStatsTaskUuid && this.flightStatsTaskUuid !== newVal) {
+        this.resetFlightStats(dock)
+      }
+      const key = this.getFlightStatsKey(dock)
+      if (!key) return
+      const snapshot = this.flightStatsByDock[key] || this.buildFlightStatsSnapshot()
+      snapshot.flightStatsTaskUuid = newVal
+      this.flightStatsByDock[key] = snapshot
+      if (this.isDockSelected(dock)) {
+        this.applyFlightStatsSnapshot(snapshot)
+      }
+    }
+  },
   created() {
     this.cesiumLib = null
     this.viewer = null
-    this.tileset = null
+    this.tilesets = []
     this.waylineEntity = null
     this.waylinePointEntities = []
     this.droneEntity = null
@@ -539,13 +615,15 @@ export default {
     this.initSelectedWaylineFromRoute()
     this.loadDockList()
     this.startDockPolling()
-    this.$nextTick(() => {
-      setTimeout(async () => {
-        await this.loadComponentConfig()
-        this.initCesium()
-      }, 500)
-    })
-  },
+    this.startFlightStatsPolling()
+      this.$nextTick(() => {
+        setTimeout(async () => {
+          await this.loadComponentConfig()
+          await this.initCesium()
+          this.focusOnModel()
+        }, 500)
+      })
+    },
   beforeUnmount() {
     if (this.fh2CheckTimer) {
       clearTimeout(this.fh2CheckTimer)
@@ -565,6 +643,10 @@ export default {
     if (this.dockPollTimer) {
       clearInterval(this.dockPollTimer)
       this.dockPollTimer = null
+    }
+    if (this.flightStatsPollTimer) {
+      clearInterval(this.flightStatsPollTimer)
+      this.flightStatsPollTimer = null
     }
     if (this.positionPollTimer) {
       clearInterval(this.positionPollTimer)
@@ -645,31 +727,54 @@ export default {
         });
 
         try {
-          this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
-          if (!this.viewer) return
+  // 定义三个模型的路径
+  // part1_terrain, part2_poles, part3_lines
+  const modelUrls = [
+    '/models/site_model/part1_terrain/tileset.json', // 地形/主模型
+    '/models/site_model/part2_poles/tileset.json',   // 杆塔
+    '/models/site_model/part3_lines/tileset.json'    // 线路
+  ];
 
-          // 修改为指向刚才启动的本地服务地址
-// 注意：因为服务是在 "3dtiles" 文件夹里启动的，所以直接访问 /tileset.json 即可
-//           this.tileset = await Cesium.Cesium3DTileset.fromUrl('http://localhost:8081/tileset.json')
-          this.viewer.scene.primitives.add(this.tileset)
-          await this.tileset.readyPromise
-          if (!this.viewer) return
+  // 并行请求加载
+  const loadPromises = modelUrls.map(url => {
+    return Cesium.Cesium3DTileset.fromUrl(url, {
+      maximumScreenSpaceError: 16, // 数值越大越模糊但越流畅
+      skipLevelOfDetail: true,     // 开启跳级加载优化
+      cullWithChildrenBounds: true // 优化剔除
+    });
+  });
 
-          const heightOffset = 0;
+  // 等待所有模型加载完成，并赋值给 this.tilesets
+  this.tilesets = await Promise.all(loadPromises);
 
-          const boundingSphere = this.tileset.boundingSphere
-          const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center)
+  if (!this.viewer) return;
 
-          const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0)
-          const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset)
-          const translation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3())
+  // 这里的逻辑是为了确保三个模型“对齐”
+  // 我们以第一个模型（通常是地形）的中心点为基准，计算一个矩阵，然后应用给所有三个模型
+  if (this.tilesets.length > 0) {
+        const mainTileset = this.tilesets[0];
+        
+        // 把所有模型添加到场景中
+        this.tilesets.forEach(ts => this.viewer.scene.primitives.add(ts));
+        
+        await mainTileset.readyPromise;
 
-          this.tileset.modelMatrix = Cesium.Matrix4.fromTranslation(translation)
-// 飞向模型
-          this.viewer.flyTo(this.tileset, {
-            duration: 2.0,
-            offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 1000)
-          })
+        // --- 计算位置校准矩阵 ---
+        const heightOffset = 0; // 如果模型整体高度不对，改这里（例如 -50）
+        const boundingSphere = mainTileset.boundingSphere;
+        const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center);
+        
+        const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0);
+        const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset);
+        const translation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3());
+        const modelMatrix = Cesium.Matrix4.fromTranslation(translation);
+
+        // [关键] 统一应用同一个矩阵，防止错位
+        this.tilesets.forEach(ts => {
+          ts.modelMatrix = modelMatrix;
+        });
+
+      }
         } catch (tilesetError) {
           console.error('加载3D Tiles模型失败:', tilesetError)
         }
@@ -1013,6 +1118,11 @@ export default {
       this.cameraMode = mode;
       this.applyCameraMode(true);
     },
+    autoStartThirdPersonForTaskDock(dock) {
+      if (!dock || !this.isDroneWorking(dock)) return
+      if (this.cameraMode === 'third') return
+      this.setCameraMode('third')
+    },
     applyCameraMode(force = false) {
       if (!this.viewer) return;
       const Cesium = this.cesiumLib || window.Cesium;
@@ -1074,11 +1184,18 @@ export default {
       });
     },
     focusOnModel() {
-      if (this.viewer && this.tileset) {
+      // 检查数组是否有内容
+      if (this.viewer && this.tilesets && this.tilesets.length > 0) {
         const Cesium = this.cesiumLib || window.Cesium;
         if (!Cesium) return;
-        const range = (this.tileset.boundingSphere?.radius || 1000) * 2.5;
-        this.viewer.flyTo(this.tileset, {
+        
+        const mainTileset = this.tilesets[0];
+        // 防止模型没加载完报错
+        if (!mainTileset || !mainTileset.boundingSphere) return;
+
+        const range = mainTileset.boundingSphere.radius * 2.5;
+        
+        this.viewer.flyTo(mainTileset, {
           offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), range)
         }).catch(err => console.warn('飞到模型失败', err));
       }
@@ -1252,6 +1369,55 @@ export default {
         this.dockPollTimer = null
       }
     },
+    startFlightStatsPolling() {
+      this.stopFlightStatsPolling()
+      this.flightStatsPollTimer = setInterval(() => {
+        this.fetchLatestPositionsForAllDocks()
+      }, 1000)
+    },
+    stopFlightStatsPolling() {
+      if (this.flightStatsPollTimer) {
+        clearInterval(this.flightStatsPollTimer)
+        this.flightStatsPollTimer = null
+      }
+    },
+    async fetchLatestPositionsForAllDocks() {
+      if (this.flightStatsPollInFlight) {
+        this.flightStatsPollQueued = true
+        return
+      }
+      this.flightStatsPollInFlight = true
+      try {
+        const response = await dronePositionApi.getLatestByDevice()
+        const list = Array.isArray(response) ? response : (response.results || response.data || [])
+        if (!Array.isArray(list) || list.length === 0) return
+        const byDevice = new Map()
+        list.forEach(item => {
+          const deviceSn = item?.device_sn || item?.drone_sn || item?.sn
+          if (deviceSn) {
+            byDevice.set(deviceSn, item)
+          }
+        })
+        const selectedKey = this.getFlightStatsKey(this.selectedDock)
+        this.docks.forEach(dock => {
+          if (!dock?.drone_sn) return
+          if (!this.isDroneWorking(dock)) return
+          if (this.getFlightStatsKey(dock) === selectedKey) return
+          const position = byDevice.get(dock.drone_sn)
+          if (position) {
+            this.updateFlightStatsForDockFromPosition(position, dock)
+          }
+        })
+      } catch (error) {
+        console.error('批量获取无人机位置失败:', error)
+      } finally {
+        this.flightStatsPollInFlight = false
+        if (this.flightStatsPollQueued) {
+          this.flightStatsPollQueued = false
+          this.fetchLatestPositionsForAllDocks()
+        }
+      }
+    },
 
     async loadDockList(silent = false) {
       if (silent && this.dockLoading) return
@@ -1279,6 +1445,13 @@ export default {
           })
         }
 
+        const previousList = Array.isArray(this.docks) ? this.docks : []
+        const previousMap = new Map()
+        previousList.forEach(dock => {
+          const key = this.getFlightStatsKey(dock)
+          if (key) previousMap.set(key, dock)
+        })
+
         this.docks = list
         this.dockLoadError = ''
         if (this.selectedDock) {
@@ -1295,6 +1468,31 @@ export default {
               this.showCreateTaskDialog = false
             }
           }
+        }
+        if (list && list.length) {
+          const selectedKey = this.getFlightStatsKey(this.selectedDock)
+          list.forEach(dock => {
+            const key = this.getFlightStatsKey(dock)
+            if (!key || key === selectedKey) return
+            const previous = previousMap.get(key)
+            if (!previous) return
+            const wasInDock = previous.drone_in_dock === 1 || previous.drone_in_dock === '1'
+            const nowWorking = dock.drone_in_dock === 0 || dock.drone_in_dock === '0'
+            if (wasInDock && nowWorking) {
+              this.resetFlightStats(dock)
+              return
+            }
+            const wasWorking = previous.drone_in_dock === 0 || previous.drone_in_dock === '0'
+            const nowInDock = dock.drone_in_dock === 1 || dock.drone_in_dock === '1'
+            if (wasWorking && nowInDock) {
+              const finalize = this.finalizeFlightStats(dock)
+              if (finalize && typeof finalize.then === 'function') {
+                finalize.then(success => {
+                  if (success) this.resetFlightStats(dock)
+                })
+              }
+            }
+          })
         }
         if (this.selectedDock) {
           this.startPositionPolling()
@@ -1318,9 +1516,12 @@ export default {
 
     handleDockSelected(dock) {
       if (!dock) return
-      const previousSn = this.selectedDock?.drone_sn
-      const previousDockSn = this.selectedDock?.dock_sn
+      const previousDock = this.selectedDock
+      const previousSn = previousDock?.drone_sn
+      const previousDockSn = previousDock?.dock_sn
+      this.saveFlightStatsForDock(previousDock)
       this.selectedDock = dock
+      this.loadFlightStatsForDock(dock)
       this.latestPositions = []
       this.positionLoading = false
       if (!previousDockSn || previousDockSn !== dock?.dock_sn) {
@@ -1334,6 +1535,7 @@ export default {
       }
       this.syncLiveStreamType()
       this.startPositionPolling()
+      this.autoStartThirdPersonForTaskDock(dock)
       const dockSn = dock?.dock_sn
       if (dockSn) {
         this.lastTaskInfoSn = dockSn
@@ -1578,6 +1780,9 @@ export default {
       const latitude = payload.latitude
       if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return
       const altitude = Number.isFinite(payload.altitude) ? payload.altitude : 0
+
+      this.updateFlightStatsFromPosition(payload)
+
       const cartesian = Cesium.Cartesian3.fromDegrees(longitude, latitude, altitude)
       const sampleTime = Cesium.JulianDate.fromDate(new Date(timestamp))
 
@@ -1651,6 +1856,191 @@ export default {
         this.updateBirdCameraFromCoords(longitude, latitude, altitude)
       } else if (this.cameraMode === 'third' && !this.chaseCameraListener) {
         this.enableChaseCamera(this.droneEntity, 80, 30)
+      }
+    },
+    getFlightStatsKey(dock = this.selectedDock) {
+      if (!dock) return ''
+      const key = dock.dock_sn || dock.id || ''
+      return String(key || '')
+    },
+    getEmptyFlightStats() {
+      return {
+        flightStartTimestamp: null,
+        flightDurationMs: 0,
+        flightDistanceKm: 0,
+        flightLastPosition: null,
+        flightLastUpdateTimestamp: null,
+        flightStatsTaskUuid: '',
+        flightStatsSaving: false,
+        flightStatsSavedTaskUuid: ''
+      }
+    },
+    buildFlightStatsSnapshot() {
+      return {
+        flightStartTimestamp: this.flightStartTimestamp,
+        flightDurationMs: this.flightDurationMs,
+        flightDistanceKm: this.flightDistanceKm,
+        flightLastPosition: this.flightLastPosition,
+        flightLastUpdateTimestamp: this.flightLastUpdateTimestamp,
+        flightStatsTaskUuid: this.flightStatsTaskUuid,
+        flightStatsSaving: this.flightStatsSaving,
+        flightStatsSavedTaskUuid: this.flightStatsSavedTaskUuid
+      }
+    },
+    applyFlightStatsSnapshot(snapshot) {
+      const safe = snapshot || this.getEmptyFlightStats()
+      this.flightStartTimestamp = safe.flightStartTimestamp ?? null
+      this.flightDurationMs = Number.isFinite(safe.flightDurationMs) ? safe.flightDurationMs : 0
+      this.flightDistanceKm = Number.isFinite(safe.flightDistanceKm) ? safe.flightDistanceKm : 0
+      this.flightLastPosition = safe.flightLastPosition || null
+      this.flightLastUpdateTimestamp = safe.flightLastUpdateTimestamp ?? null
+      this.flightStatsTaskUuid = safe.flightStatsTaskUuid || ''
+      this.flightStatsSaving = Boolean(safe.flightStatsSaving)
+      this.flightStatsSavedTaskUuid = safe.flightStatsSavedTaskUuid || ''
+    },
+    saveFlightStatsForDock(dock = this.selectedDock, snapshot = null) {
+      const key = this.getFlightStatsKey(dock)
+      if (!key) return
+      const data = snapshot ? { ...snapshot } : { ...this.buildFlightStatsSnapshot() }
+      this.flightStatsByDock[key] = data
+    },
+    loadFlightStatsForDock(dock = this.selectedDock) {
+      const key = this.getFlightStatsKey(dock)
+      if (!key) {
+        this.applyFlightStatsSnapshot(this.getEmptyFlightStats())
+        return
+      }
+      const snapshot = this.flightStatsByDock[key]
+      if (snapshot) {
+        this.applyFlightStatsSnapshot(snapshot)
+      } else {
+        this.applyFlightStatsSnapshot(this.getEmptyFlightStats())
+      }
+    },
+    updateFlightStatsForDockFromPosition(position, dock = this.selectedDock) {
+      if (!position) return
+      const payload = this.extractPositionData(position)
+      this.updateFlightStatsForDock(payload, dock)
+    },
+    updateFlightStatsForDock(payload, dock = this.selectedDock) {
+      if (!dock || !this.isDroneWorking(dock)) return
+      if (!payload) return
+      const longitude = payload.longitude
+      const latitude = payload.latitude
+      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return
+      const altitude = Number.isFinite(payload.altitude) ? payload.altitude : 0
+
+      const key = this.getFlightStatsKey(dock)
+      if (!key) return
+      const snapshot = this.flightStatsByDock[key]
+        ? { ...this.flightStatsByDock[key] }
+        : this.getEmptyFlightStats()
+
+      const now = Date.now()
+      if (!snapshot.flightStartTimestamp) {
+        snapshot.flightStartTimestamp = now
+        snapshot.flightDurationMs = 0
+        snapshot.flightDistanceKm = 0
+        snapshot.flightLastPosition = { longitude, latitude, altitude }
+        snapshot.flightLastUpdateTimestamp = now
+        if (!snapshot.flightStatsTaskUuid && this.isDockSelected(dock) && this.currentTaskUuid) {
+          snapshot.flightStatsTaskUuid = this.currentTaskUuid
+        }
+        this.saveFlightStatsForDock(dock, snapshot)
+        if (this.isDockSelected(dock)) {
+          this.applyFlightStatsSnapshot(snapshot)
+        }
+        return
+      }
+
+      if (snapshot.flightLastPosition) {
+        const distance = this.getWaypointDistanceMeters(snapshot.flightLastPosition, { longitude, latitude, altitude })
+        if (Number.isFinite(distance) && distance >= 0) {
+          snapshot.flightDistanceKm += distance / 1000
+        }
+      }
+
+      snapshot.flightLastPosition = { longitude, latitude, altitude }
+      snapshot.flightLastUpdateTimestamp = now
+      snapshot.flightDurationMs = Math.max(0, now - snapshot.flightStartTimestamp)
+      if (!snapshot.flightStatsTaskUuid && this.isDockSelected(dock) && this.currentTaskUuid) {
+        snapshot.flightStatsTaskUuid = this.currentTaskUuid
+      }
+      this.saveFlightStatsForDock(dock, snapshot)
+      if (this.isDockSelected(dock)) {
+        this.applyFlightStatsSnapshot(snapshot)
+      }
+    },
+    updateFlightStatsFromPosition(payload) {
+      this.updateFlightStatsForDock(payload, this.selectedDock)
+    },
+    async finalizeFlightStats(dock = this.selectedDock) {
+      const key = this.getFlightStatsKey(dock)
+      if (!key) return false
+      let snapshot = this.flightStatsByDock[key]
+      if (!snapshot && this.isDockSelected(dock)) {
+        snapshot = this.buildFlightStatsSnapshot()
+        this.flightStatsByDock[key] = { ...snapshot }
+      }
+      if (!snapshot) return false
+      let taskUuid = snapshot.flightStatsTaskUuid
+      if (!taskUuid && this.isDockSelected(dock) && this.currentTaskUuid) {
+        taskUuid = this.currentTaskUuid
+      }
+      if (!taskUuid) {
+        taskUuid = await this.resolveTaskUuidForDock(dock)
+        if (taskUuid) {
+          snapshot.flightStatsTaskUuid = taskUuid
+          this.flightStatsByDock[key] = snapshot
+        }
+      }
+      if (!taskUuid) return false
+      if (snapshot.flightStatsSaving) return false
+      if (snapshot.flightStatsSavedTaskUuid === taskUuid) return false
+      if (!snapshot.flightStartTimestamp) return false
+
+      const endTime = snapshot.flightLastUpdateTimestamp || Date.now()
+      const durationMs = Math.max(0, endTime - snapshot.flightStartTimestamp)
+      const durationSeconds = Math.max(0, Math.floor(durationMs / 1000))
+      const distanceKm = Number.isFinite(snapshot.flightDistanceKm) ? snapshot.flightDistanceKm : 0
+
+      snapshot.flightDurationMs = durationMs
+      snapshot.flightStatsSaving = true
+      this.flightStatsByDock[key] = snapshot
+      if (this.isDockSelected(dock)) {
+        this.applyFlightStatsSnapshot(snapshot)
+      }
+      try {
+        await flightTaskInfoApi.updateFlightStats(taskUuid, {
+          task_uuid: taskUuid,
+          flight_duration: durationSeconds,
+          flight_distance: distanceKm
+        })
+        snapshot.flightStatsSavedTaskUuid = taskUuid
+        this.flightStatsByDock[key] = snapshot
+        if (this.isDockSelected(dock)) {
+          this.applyFlightStatsSnapshot(snapshot)
+        }
+        return true
+      } catch (error) {
+        console.error('保存飞行统计失败:', error)
+        return false
+      } finally {
+        snapshot.flightStatsSaving = false
+        this.flightStatsByDock[key] = snapshot
+        if (this.isDockSelected(dock)) {
+          this.applyFlightStatsSnapshot(snapshot)
+        }
+      }
+    },
+    resetFlightStats(dock = this.selectedDock) {
+      const cleared = this.getEmptyFlightStats()
+      const key = this.getFlightStatsKey(dock)
+      if (key) {
+        this.flightStatsByDock[key] = { ...cleared }
+      }
+      if (!dock || this.isDockSelected(dock)) {
+        this.applyFlightStatsSnapshot(cleared)
       }
     },
     extractPositionData(position) {
@@ -1819,6 +2209,14 @@ export default {
         this.currentTaskInfo = taskInfo
         const params = this.parseTaskParams(taskInfo.params)
         this.updateProtectedTaskContext(taskInfo, params)
+        if (this.isTaskFinished(taskInfo, params)) {
+          const finalize = this.finalizeFlightStats(this.selectedDock)
+          if (finalize && typeof finalize.then === 'function') {
+            finalize.then(success => {
+              if (success) this.resetFlightStats(this.selectedDock)
+            })
+          }
+        }
         const waylineUuid = params?.wayline_uuid || params?.wayline_id || taskInfo.wayline_id
         const normalizedUuid = String(waylineUuid || '').trim()
         if (!normalizedUuid) return
@@ -1887,6 +2285,60 @@ export default {
         if (value) return value
       }
       return ''
+    },
+    async resolveTaskUuidForDock(dock) {
+      const dockSn = dock?.dock_sn
+      if (!dockSn) return ''
+      try {
+        const response = await flightTaskInfoApi.getLatestBySn(dockSn)
+        let taskInfo = response
+        if (Array.isArray(response)) {
+          taskInfo = response[0]
+        } else if (response?.results) {
+          taskInfo = response.results[0]
+        } else if (response?.data && typeof response.data === 'object' && !Array.isArray(response.data)) {
+          taskInfo = response.data
+        }
+        if (!taskInfo || Object.keys(taskInfo).length === 0) return ''
+        const params = this.parseTaskParams(taskInfo.params)
+        return this.getTaskUuidFromTaskInfo(taskInfo, params)
+      } catch (error) {
+        console.error('获取任务UUID失败:', error)
+        return ''
+      }
+    },
+    isTaskFinished(taskInfo, params) {
+      const rawStatus =
+        taskInfo?.status ??
+        taskInfo?.task_status ??
+        params?.status ??
+        params?.task_status ??
+        params?.taskStatus
+      const status = String(rawStatus || '').trim().toLowerCase()
+      if (status) {
+        const finishedStates = new Set([
+          'finished',
+          'complete',
+          'completed',
+          'success',
+          'succeeded',
+          'done',
+          'ended',
+          'stopped',
+          'canceled',
+          'cancelled',
+          'failed'
+        ])
+        if (finishedStates.has(status)) return true
+      }
+      const endTime =
+        taskInfo?.end_time ??
+        taskInfo?.finished_at ??
+        taskInfo?.completed_at ??
+        params?.end_time ??
+        params?.finished_at ??
+        params?.completed_at
+      return Boolean(endTime)
     },
     extractTaskIdFromImageUrl(url) {
       if (!url) return ''
@@ -2061,6 +2513,22 @@ export default {
 
     formatPositionTime(timestamp) {
       return this.formatAlarmTime(timestamp)
+    },
+
+    formatFlightDuration(durationMs = this.flightDurationMs) {
+      if (!this.flightStartTimestamp) return '--'
+      const safeMs = Number.isFinite(durationMs) ? durationMs : 0
+      const totalSeconds = Math.max(0, Math.floor(safeMs / 1000))
+      const hours = Math.floor(totalSeconds / 3600)
+      const minutes = Math.floor((totalSeconds % 3600) / 60)
+      const seconds = totalSeconds % 60
+      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    },
+
+    formatFlightDistance(distanceKm = this.flightDistanceKm) {
+      if (!this.flightStartTimestamp) return '--'
+      const safeKm = Number.isFinite(distanceKm) ? distanceKm : 0
+      return `${safeKm.toFixed(3)} km`
     },
 
     formatPositionCoords(position) {

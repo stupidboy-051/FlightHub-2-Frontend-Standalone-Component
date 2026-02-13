@@ -44,5 +44,15 @@ export default {
       console.error('Failed to fetch flight task info:', error)
       throw error
     }
+  },
+  async updateFlightStats(taskUuid, payload = {}) {
+    if (!taskUuid) return {}
+    try {
+      const encoded = encodeURIComponent(taskUuid)
+      return await api.patch(`/flight-task-info/${encoded}/`, payload)
+    } catch (error) {
+      console.error('Failed to update flight stats:', error)
+      throw error
+    }
   }
 }
