@@ -25,6 +25,7 @@
         v-for="(item, idx) in normalizedSeries"
         :key="item.id ?? item.name ?? idx"
         class="donut-segment"
+        :class="{ 'is-clickable': clickable }"
         :filter="`url(#${glowId})`"
         cx="70"
         cy="70"
@@ -36,6 +37,7 @@
         :stroke-dasharray="getDonutDash(item.value)"
         :stroke-dashoffset="getDonutOffset(idx)"
         transform="rotate(-90 70 70)"
+        @click="handleSegmentClick(item)"
       />
 
       <text x="70" y="64" text-anchor="middle" class="donut-label">{{ totalLabel }}</text>
@@ -49,10 +51,12 @@
 <script>
 export default {
   name: 'DonutRing',
+  emits: ['segment-click'],
   props: {
     series: { type: Array, default: () => [] },
     totalLabel: { type: String, default: '总异常' },
-    totalValue: { type: [Number, String], default: null }
+    totalValue: { type: [Number, String], default: null },
+    clickable: { type: Boolean, default: false }
   },
   data() {
     return {
@@ -75,6 +79,10 @@ export default {
     }
   },
   methods: {
+    handleSegmentClick(item) {
+      if (!this.clickable) return
+      this.$emit('segment-click', item)
+    },
     getDonutDash(value) {
       const circumference = 2 * Math.PI * 44
       const total = this.donutTotal || 1
@@ -99,13 +107,17 @@ export default {
 }
 
 .donut-chart {
-  width: 150px;
-  height: 150px;
+  width: var(--donut-size, 150px);
+  height: var(--donut-size, 150px);
   flex-shrink: 0;
 }
 
 .donut-segment {
   transition: opacity 0.2s ease;
+}
+
+.donut-segment.is-clickable {
+  cursor: pointer;
 }
 
 .donut-track {
@@ -124,4 +136,3 @@ export default {
   font-weight: 800;
 }
 </style>
-

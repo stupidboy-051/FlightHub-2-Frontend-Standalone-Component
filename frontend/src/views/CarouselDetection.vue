@@ -36,25 +36,7 @@
           </div>
         </div>
 
-        <!-- 自定义下拉框 - 航线 -->
-        <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('wayline')">
-          <div class="custom-select-trigger" @click="toggleDropdown('wayline')" :class="{ 'is-open': activeDropdown === 'wayline' }">
-            <span>{{ getWaylineLabel(selectedWayline) }}</span>
-            <span class="arrow-icon">▼</span>
-          </div>
-          <div v-show="activeDropdown === 'wayline'" class="custom-select-options">
-            <div class="option-item" :class="{ 'is-selected': selectedWayline === '' }" @click="selectWayline('')">全部航线</div>
-            <div 
-              v-for="item in filteredWaylines" 
-              :key="item.optionValue" 
-              class="option-item"
-              :class="{ 'is-selected': selectedWayline === item.optionValue }"
-              @click="selectWayline(item.optionValue)"
-            >
-              {{ item.name || ('航线 ' + item.optionValue) }}
-            </div>
-          </div>
-        </div>
+
         <div class="stat-chip">
           <span class="stat-label">检测中(任务)</span>
           <span class="stat-value">{{ taskProcessingCount }}</span>
@@ -101,7 +83,6 @@
                 class="location-header"
                 @click="toggleCategory(categoryGroup.code)"
               >
-                <span class="location-icon">{{ categoryGroup.icon }}</span>
                 <span class="location-name">{{ categoryGroup.name }}</span>
                 <span class="location-count">({{ categoryGroup.taskCount }})</span>
                 <span class="toggle-icon">{{ isCategoryExpanded(categoryGroup.code) ? '▼' : '▶' }}</span>
@@ -118,7 +99,6 @@
                     class="type-header"
                     @click="toggleWaylineInTree(categoryGroup.code, waylineGroup.id)"
                   >
-                    <span class="type-icon">🛤️</span>
                     <span class="type-name">{{ waylineGroup.name }}</span>
                     <span class="type-count" :class="{ 'highlight-count': waylineGroup.tasks.length > 0 }">({{ waylineGroup.tasks.length }})</span>
                     <span class="toggle-icon">{{ isWaylineExpanded(categoryGroup.code, waylineGroup.id) ? '▼' : '▶' }}</span>
@@ -204,8 +184,21 @@
             <transition name="fade" mode="out-in">
               <div v-if="currentSlide" :key="currentSlide.key" class="flow-slide">
                 <!-- 左侧：图片区域 -->
-                <div class="slide-image-section">
-                  <img v-if="currentSlide.image_url" :src="currentSlide.image_url" alt="告警图片" />
+                <div class="slide-image-section" @click="handleImageClick('slideImage', $event)">
+                  <el-image 
+                    ref="slideImage"
+                    v-if="currentSlide.image_url" 
+                    :src="currentSlide.image_url" 
+                    :preview-src-list="[currentSlide.image_url]"
+                    fit="contain"
+                    style="width: 100%; height: 100%;"
+                    :hide-on-click-modal="true"
+                    :preview-teleported="true"
+                  >
+                    <template #error>
+                      <div class="image-placeholder">暂无图片</div>
+                    </template>
+                  </el-image>
                   <div v-else class="image-placeholder">暂无图片</div>
                   <div class="status-tag" :class="currentSlide.state">
                     {{ currentSlide.stateText }}
@@ -260,15 +253,26 @@
             </div>
             <div v-else-if="currentInspectImage" class="flow-slide">
               <!-- 左侧：图片区域 -->
-              <div class="slide-image-section" @click="handleMarqueeClick(currentInspectImage)">
-                <img 
-                  v-if="getInspectImageUrl(currentInspectImage) && !imageLoadError" 
+              <div class="slide-image-section" @click="handleImageClick('inspectImage', $event)">
+                <el-image 
+                  ref="inspectImage"
+                  v-if="getInspectImageUrl(currentInspectImage)" 
                   :src="getInspectImageUrl(currentInspectImage)" 
-                  alt="巡检图片" 
+                  :preview-src-list="[getInspectImageUrl(currentInspectImage)]"
+                  fit="contain"
+                  style="width: 100%; height: 100%;"
+                  :hide-on-click-modal="true"
+                  :preview-teleported="true"
                   @error="handleImageError"
-                />
+                >
+                  <template #error>
+                    <div class="image-placeholder">
+                      {{ imageLoadError ? '图片加载失败' : '暂无图片' }}
+                    </div>
+                  </template>
+                </el-image>
                 <div v-else class="image-placeholder">
-                  {{ imageLoadError ? '图片加载失败' : '暂无图片' }}
+                  暂无图片
                 </div>
               </div>
 
@@ -340,29 +344,7 @@
       </div>
     </div>
 
-    <div v-if="previewItem" class="modal-overlay" @click.self="closePreview">
-      <div class="modal-premium detail-modal">
-        <div class="modal-header">
-          <h3 class="modal-title">图片预览</h3>
-          <button class="modal-close" @click="closePreview">×</button>
-        </div>
-        <div class="modal-body preview-body">
-          <div class="preview-image">
-            <img :src="previewItem.image_url" alt="航线图片预览" />
-          </div>
-          <div class="preview-meta">
-            <div class="meta-row"><strong>ID：</strong> {{ previewItem.id || '—' }}</div>
-            <div class="meta-row"><strong>航线：</strong> {{ previewItem.wayline_details?.name || previewItem.wayline?.name || '—' }}</div>
-            <div class="meta-row"><strong>时间：</strong> {{ formatTime(previewItem.created_at) }}</div>
-            <div class="meta-row" v-if="previewItem.title"><strong>标题：</strong> {{ previewItem.title }}</div>
-            <div class="meta-row" v-if="previewItem.description"><strong>描述：</strong> {{ previewItem.description }}</div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="modal-btn secondary-btn" @click="closePreview">关闭</button>
-        </div>
-      </div>
-    </div>
+
   </div>
 </template>
 
@@ -387,11 +369,9 @@ export default {
       expandedLocations: new Set(),
       expandedTypes: new Set(),
       selectedType: '',
-      selectedWayline: '',
       flowSlides: [],
       marqueeItems: [],
       marqueeError: '',
-      previewItem: null,
       activeIndex: 0,
       autoTimer: null,
       carouselInterval: 4500,
@@ -478,27 +458,7 @@ export default {
         name: item.name
       }))
     },
-    // 根据选中的检测类型筛选航线列表
-    filteredWaylines() {
-      if (!this.selectedType) {
-        return this.waylines
-      }
-      
-      const filter = this.selectedType.toLowerCase()
-      const variantsMap = {
-        'rail': ['rail', 'track'],
-        'contactline': ['contactline', 'catenary', 'overhead', 'insulator', 'pole'],
-        'bridge': ['bridge'],
-        'protected_area': ['protected_area', 'protection_zone', 'protection_area']
-      }
-      
-      const targetVariants = variantsMap[filter] || [filter]
-      
-      return this.waylines.filter(wayline => {
-        const type = (wayline.detect_type || '').toLowerCase()
-        return targetVariants.some(v => type.includes(v))
-      })
-    },
+
     // 统计当前筛选条件下的所有任务
     filteredTasks() {
       let tasks = []
@@ -511,12 +471,6 @@ export default {
         }
         
         typeNode.waylines.forEach(wayline => {
-          // 如果选中了航线且不匹配，则跳过
-          // 注意：selectedWayline 存储的是 optionValue (id)
-          if (this.selectedWayline && wayline.id !== this.selectedWayline) {
-            return
-          }
-          
           if (wayline.tasks && wayline.tasks.length) {
             tasks = tasks.concat(wayline.tasks)
           }
@@ -571,7 +525,6 @@ export default {
     }
   },
   mounted() {
-    this.loadWaylines()
     this.refreshAll()
     this.loadHistoryTree() // 初始加载历史任务树
     // 启动刷新定时器（10秒一次）
@@ -729,7 +682,8 @@ export default {
         }
         console.log('🔍 选中的任务数据:', task)
         this.currentInspectTaskId = task.id
-        this.currentInspectTaskName = task.external_task_id || `任务 ${task.id}`
+        // 优先显示 DJI 任务名称，其次是外部 ID，最后才是 ID
+        this.currentInspectTaskName = task.dji_task_name || task.external_task_id || `任务 ${task.id}`
         // 如果是从外部调用（回放模式），设置标记
         if (forceDetectMode) {
           this.isDetectMode = true
@@ -856,59 +810,6 @@ export default {
         this.error = '加载告警图片失败，请稍后重试'
       } finally {
         this.loading = false
-      }
-    },
-    async loadWaylines() {
-      this.loadingWaylines = true
-      try {
-        let allWaylines = []
-        let page = 1
-        let hasNext = true
-        
-        while (hasNext) {
-          const res = await waylineApi.getWaylines({ page, page_size: 100 })
-          let list = []
-          
-          if (Array.isArray(res)) {
-             list = res
-             hasNext = false
-          } else {
-             list = res?.results || []
-             if (!res.next) {
-               hasNext = false
-             } else {
-               page++
-             }
-          }
-          allWaylines = allWaylines.concat(list)
-        }
-
-        console.log('📊 API返回航线数量:', allWaylines.length)
-        console.log('📊 所有航线ID:', allWaylines.map(w => w.id).sort((a, b) => a - b))
-
-        // 保存所有航线数据
-        this.allWaylines = allWaylines
-
-        // 构建原有的 waylines 数组（用于筛选）
-        this.waylines = allWaylines
-          .map(item => {
-            const optionValue = item.wayline_id ?? item.id
-            if (optionValue === undefined || optionValue === null) return null
-            return {
-              ...item,
-              optionValue
-            }
-          })
-          .filter(Boolean)
-
-        // 构建地点树形结构
-        this.buildLocationTree()
-      } catch (err) {
-        console.warn('加载航线列表失败，使用空列表', err)
-        this.waylines = []
-        this.allWaylines = []
-      } finally {
-        this.loadingWaylines = false
       }
     },
     async loadAlarms() {
@@ -1127,43 +1028,17 @@ export default {
       this.activeDropdown = ''
       this.handleFilterChange()
     },
-    selectWayline(id) {
-      this.selectedWayline = id
-      this.activeDropdown = ''
-      this.handleFilterChange()
-    },
     getTypeLabel(code) {
       if (!code) return '全部类型'
       const type = this.detectionTypes.find(t => t.code === code)
       return type ? type.name : code
     },
-    getWaylineLabel(id) {
-      if (!id) return '全部航线'
-      const w = this.waylines.find(item => item.optionValue === id)
-      return w ? (w.name || '航线 ' + id) : id
-    },
     handleFilterChange() {
-      // 如果切换了类型，且当前选中的航线不在新类型的航线列表中，重置航线选择
-      if (this.selectedType && this.selectedWayline) {
-        const typeNode = this.detectionTree.find(node => node.code === this.selectedType)
-        if (typeNode) {
-          const hasWayline = typeNode.waylines.some(w => w.id === this.selectedWayline)
-          if (!hasWayline) {
-            this.selectedWayline = ''
-          }
-        }
-      }
-
       this.activeIndex = 0
       this.stopAuto()
       this.refreshAll()
     },
-    handleMarqueeClick(item) {
-      this.previewItem = item
-    },
-    closePreview() {
-      this.previewItem = null
-    },
+
     buildSlides(list) {
       return list.map((item, idx) => {
         // 移除“伪装检测中”的逻辑，全部展示为识别完成
@@ -1940,6 +1815,16 @@ export default {
       const pad = num => String(num).padStart(2, '0')
       return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
     },
+    handleImageClick(refName, event) {
+      // 如果点击的是图片本身，el-image 组件会自动处理预览，无需干预
+      if (event.target.tagName === 'IMG') return
+      
+      // 如果点击的是空白区域，手动打开预览
+      const imageComponent = this.$refs[refName]
+      if (imageComponent) {
+        imageComponent.showViewer = true
+      }
+    },
     handleImageError() {
       if (!this.useFallbackImage && this.currentInspectImage?.result_signed_url && this.currentInspectImage?.signed_url) {
         this.useFallbackImage = true
@@ -1951,27 +1836,24 @@ export default {
     // 误报反馈
     async reportSuspicious(image) {
       if (!image) return
-      
+
       try {
-        await ElMessageBox.prompt('请输入误报说明（选填）', '误报反馈确认', {
+        const { value } = await ElMessageBox.prompt('请输入误报说明（选填）', '误报反馈确认', {
           confirmButtonText: '确认上报',
           cancelButtonText: '取消',
           inputPlaceholder: '例如：此处并非异常，识别有误',
           inputType: 'textarea'
-        }).then(async ({ value }) => {
-          const data = {
-            inspect_image_id: image.id,
-            image_url: image.signed_url || image.image_url,
-            image_path: image.image_path || image.image_url, // 补充必填字段 image_path
-            description: value || '用户标记为误报',
-            // 如果需要关联任务信息
-            task_id: this.currentInspectTaskId,
-            source: 'carousel_detection'
-          }
-          
-          await suspiciousImageApi.reportSuspiciousImage(data)
-          ElMessage.success('误报反馈已提交')
         })
+
+        const data = {
+          inspect_image: image.id,  // 修复：后端模型字段是 inspect_image（ForeignKey ID）
+          image_path: image.image_path || image.signed_url || image.image_url,  // 修复：必填字段，使用已知的值
+          note: value || '用户标记为误报'  // 修复：后端模型字段是 note，而非 description
+          // 移除了 task_id 和 source，因为后端 SuspiciousImage 模型中没有这些字段
+        }
+
+        await suspiciousImageApi.reportSuspiciousImage(data)
+        ElMessage.success('误报反馈已提交')
       } catch (err) {
         if (err !== 'cancel') {
           console.error('上报失败:', err)
@@ -3038,6 +2920,7 @@ export default {
   font-weight: 700;
   font-size: 13px;
   backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 
 .status-tag-inline {

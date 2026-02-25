@@ -147,6 +147,58 @@ body.dark-theme {
   box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.3) !important;
 }
 
+/* 消息盒子 */
+.el-message-box {
+  background: #0c4a6e !important;
+  border: 1px solid #0ea5e9 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px rgba(14, 165, 233, 0.3) !important;
+  padding-bottom: 20px !important;
+}
+
+.el-message-box__header {
+  padding-top: 20px !important;
+}
+
+.el-message-box__title {
+  color: #e0f2fe !important;
+  font-weight: 600 !important;
+}
+
+.el-message-box__content {
+  color: #e0f2fe !important;
+  font-size: 14px !important;
+}
+
+.el-message-box__message p {
+  line-height: 1.6 !important;
+}
+
+.el-message-box__input .el-input__inner,
+.el-message-box__input .el-textarea__inner {
+  background-color: #075985 !important;
+  border: 1px solid #0ea5e9 !important;
+  color: #e0f2fe !important;
+}
+
+.el-message-box__input .el-input__inner:focus,
+.el-message-box__input .el-textarea__inner:focus {
+  border-color: #7dd3fc !important;
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.3) !important;
+}
+
+.el-message-box__btns button:nth-child(1) {
+  /* 取消按钮样式调整 */
+  background: transparent !important;
+  border: 1px solid #0ea5e9 !important;
+  color: #e0f2fe !important;
+}
+
+.el-message-box__btns button:nth-child(1):hover {
+  background: rgba(14, 165, 233, 0.1) !important;
+  color: #7dd3fc !important;
+}
+
 /* 对话框 */
 .el-dialog {
   background: #0c4a6e !important;

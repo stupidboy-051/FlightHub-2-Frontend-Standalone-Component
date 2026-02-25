@@ -42,7 +42,7 @@
       </div>
 
       <!-- 自定义下拉框 - 航线筛选 (Level 2) -->
-      <div class="custom-select-wrapper" v-click-outside="() => closeDropdown('wayline')">
+      <div class="custom-select-wrapper wayline-select" v-click-outside="() => closeDropdown('wayline')">
         <div class="custom-select-trigger" @click="toggleDropdown('wayline')" :class="{ 'is-open': activeDropdown === 'wayline' }">
           <span>{{ getWaylineLabel(waylineFilter) || '全部航线' }}</span>
           <span class="arrow-icon">▼</span>
@@ -60,6 +60,10 @@
           </div>
         </div>
       </div>
+
+      <button @click="resetFilters" class="action-btn view-btn clear-all-btn">
+        重复筛选
+      </button>
     </div>
     
     <!-- 任务表格 -->
@@ -73,10 +77,9 @@
         <thead>
           <tr>
             <th width="24%">巡检任务名</th>
-            <th width="10%">执行设备</th> <!-- 🔥 新增列 -->
-            <!-- 🔥 选了检测类型时显示航线和检测类型列 -->
-            <th v-if="categoryFilter" width="14%">航线名称</th>
-            <th v-if="categoryFilter" width="8%">检测类型</th>
+            <th v-if="isSubTaskMode" width="10%">执行设备</th>
+            <th v-if="isSubTaskMode" width="14%">航线名称</th>
+            <th v-if="isSubTaskMode" width="8%">检测类型</th>
             <th width="14%">创建时间</th>
             <th width="8%">状态</th>
             <th width="8%">已清理</th>
@@ -85,23 +88,22 @@
         </thead>
         <tbody>
           <tr v-if="filteredTasks.length === 0">
-            <td :colspan="categoryFilter ? 8 : 6" class="empty-row">暂无任务数据</td>
+            <td :colspan="isSubTaskMode ? 8 : 6" class="empty-row">暂无任务数据</td>
           </tr>
           <tr v-for="task in filteredTasks" :key="task.id" class="task-row">
             <td>
               <!-- 🔥 修复：父任务显示external_task_id，子任务显示dji_task_name -->
-              <span class="task-name" :title="task.external_task_id">
-                {{ categoryFilter ? (task.dji_task_name || task.external_task_id || '--') : (task.external_task_id || '--') }}
+              <span class="task-name" :title="isSubTaskMode ? (task.dji_task_name || task.external_task_id) : task.external_task_id">
+                {{ isSubTaskMode ? (task.dji_task_name || task.external_task_id || '--') : (task.external_task_id || '--') }}
               </span>
             </td>
-            <td>
+            <td v-if="isSubTaskMode">
               <span class="device-badge" :class="{'has-sn': task.device_sn}">
                 {{ task.device_sn || '--' }}
               </span>
             </td>
-            <!-- 🔥 选了检测类型时显示子任务的航线和检测类型 -->
-            <td v-if="categoryFilter">{{ task.wayline_details?.name || '--' }}</td>
-            <td v-if="categoryFilter">
+            <td v-if="isSubTaskMode">{{ task.wayline_details?.name || '--' }}</td>
+            <td v-if="isSubTaskMode">
               <span class="category-badge">
                 {{ task.detect_category_name || getCategoryName(task.detect_category) || '未设置' }}
               </span>
@@ -121,22 +123,19 @@
             </td>
             <td>
               <div class="action-buttons">
-                <!-- 🔥 如果是子任务，显示回放按钮 -->
                 <button
-                  v-if="categoryFilter && task.detect_status === 'done'"
+                  v-if="isSubTaskMode && task.detect_status === 'done'"
                   @click="playbackSubTask(task)"
                   class="action-btn playback-btn"
                 >
                   回放
                 </button>
-                <button v-else @click="viewTaskDetail(task)" class="action-btn view-btn">
+                <button @click="viewTaskDetail(task)" class="action-btn view-btn">
                   查看
                 </button>
-                <!-- 父任务才显示查看子任务按钮 -->
-                <button v-if="!categoryFilter" @click="viewSubTasks(task)" class="action-btn subtask-btn">
+                <button v-if="!isSubTaskMode" @click="viewSubTasks(task)" class="action-btn subtask-btn">
                   查看子任务
                 </button>
-                <!-- 🔥 新增：强制删除按钮（只对进行中的任务显示） -->
                 <button
                   v-if="task.detect_status === 'scanning' || task.detect_status === 'processing'"
                   @click="forceDeleteTask(task)"
@@ -183,9 +182,9 @@
     <!-- 父任务详情对话框 -->
     <Teleport to="body">
       <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
-        <div class="modal-premium detail-modal">
+        <div class="modal-premium detail-modal" :class="isCurrentParentTask ? 'detail-modal--parent' : 'detail-modal--child'">
           <div class="modal-header">
-            <h3 class="modal-title">父任务详情</h3>
+            <h3 class="modal-title">{{ isCurrentParentTask ? '父任务详情' : '子任务详情' }}</h3>
             <button @click="showDetailDialog = false" class="modal-close">×</button>
           </div>
           <div class="modal-body">
@@ -196,15 +195,19 @@
               </div>
               <div class="detail-item">
                 <span class="detail-label">巡检任务名</span>
-                <span class="detail-value">{{ currentTask?.external_task_id || '--' }}</span>
+                <span class="detail-value">{{ currentTask?.dji_task_name || currentTask?.external_task_id || '--' }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">检测类型</span>
-                <span class="detail-value">--（父任务无检测类型）</span>
+                <span class="detail-value">
+                  {{ currentTask?.detect_category_name || getCategoryName(currentTask?.detect_category) || '--' }}
+                </span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">航线</span>
-                <span class="detail-value">--（父任务无航线）</span>
+                <span class="detail-value">
+                  {{ currentTask?.wayline_details?.name || getWaylineLabel(currentTask?.wayline) || '--' }}
+                </span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">创建时间</span>
@@ -221,6 +224,46 @@
                 <span class="clean-badge" :class="currentTask?.is_cleaned ? 'cleaned' : 'not-cleaned'">
                   {{ currentTask?.is_cleaned ? '已清理' : '未清理' }}
                 </span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">图片总数</span>
+                <span class="detail-value">{{ currentTaskTotalImages }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">异常数</span>
+                <span class="detail-value">{{ currentTaskAlarmCount }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">异常率</span>
+                <span class="detail-value">{{ calculateAnomalyRate(currentTaskAlarmCount, currentTaskTotalImages) }}</span>
+              </div>
+            </div>
+
+            <div v-if="isCurrentParentTask" class="parent-chart-section">
+              <div v-if="parentDonutSeries.length" class="parent-chart-wrap">
+                <DonutRing
+                  style="--donut-size: 120px"
+                  :series="parentDonutSeries"
+                  total-label="图片总数"
+                  :total-value="parentDonutTotalImages"
+                  :clickable="true"
+                  @segment-click="handleParentSegmentClick"
+                />
+                <div class="parent-chart-legend">
+                  <div v-for="item in parentDonutSeries" :key="item.id" class="legend-item">
+                    <span class="legend-dot" :style="{ background: item.color }"></span>
+                    <span class="legend-name">{{ item.name }}</span>
+                    <span class="legend-value">{{ item.total_images }}</span>
+                    <span class="legend-percent">{{ getPercent(item.total_images, parentDonutTotalImages) }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-row">暂无子任务统计</div>
+
+              <div v-if="selectedParentSlice" class="parent-chart-selected">
+                <span class="selected-name">{{ selectedParentSlice.name }}</span>
+                <span class="selected-rate">{{ calculateAnomalyRate(selectedParentSlice.alarm_count, selectedParentSlice.total_images) }}</span>
+                <span class="selected-meta">({{ selectedParentSlice.alarm_count || 0 }}/{{ selectedParentSlice.total_images || 0 }})</span>
               </div>
             </div>
           </div>
@@ -249,6 +292,9 @@
                   <th width="140">执行设备</th> <!-- 🔥 新增 -->
                   <th width="250">航线名称</th>
                   <th width="120">检测类型</th>
+                  <th width="80">总数</th> <!-- 🔥 新增 -->
+                  <th width="80">异常数</th> <!-- 🔥 新增 -->
+                  <th width="80">异常率</th> <!-- 🔥 新增 -->
                   <th width="170">开始时间</th>
                   <th width="170">完成时间</th>
                   <th width="100">状态</th>
@@ -260,12 +306,19 @@
                   <td><span class="id-badge">{{ item.id }}</span></td>
                   <td>{{ item.external_task_id || '--' }}</td>
                   <td><span class="device-badge">{{ item.device_sn || '--' }}</span></td> <!-- 🔥 新增 -->
-                  <td>{{ item.wayline_details?.name || '--' }}</td>
+                  <td>{{ item.wayline_details?.name || getWaylineLabel(item.wayline) || '--' }}</td>
                   <td>
                     <span class="category-badge">
-                      {{ item.detect_category_name || '未设置' }}
+                      {{ item.detect_category_name || getCategoryName(item.detect_category) || '未设置' }}
                     </span>
                   </td>
+                  <td>{{ item.total_images || 0 }}</td>
+                  <td>
+                    <span class="alarm-count-text" :class="{'has-alarm': item.alarm_count > 0}">
+                      {{ item.alarm_count || 0 }}
+                    </span>
+                  </td>
+                  <td>{{ calculateAnomalyRate(item.alarm_count, item.total_images) }}</td>
                   <td><span class="datetime-text">{{ formatDate(item.started_at) }}</span></td>
                   <td><span class="datetime-text">{{ formatDate(item.finished_at) }}</span></td>
                   <td>
@@ -300,9 +353,13 @@
 import inspectTaskApi from '../api/inspectTaskApi'
 import waylineApi from '../api/waylineApi'
 import { ElMessage } from 'element-plus'
+import DonutRing from './dashboard/DonutRing.vue'
 
 export default {
   name: 'InspectTaskList',
+  components: {
+    DonutRing
+  },
   data() {
     return {
       tasks: [],
@@ -321,7 +378,10 @@ export default {
       currentTask: null,
       showSubTaskDialog: false,
       subTasks: [],
-      activeDropdown: '' // 当前打开的下拉框：'status' | 'category' | 'wayline' | ''
+      activeDropdown: '',
+      parentDonutSeries: [],
+      parentDonutTotalImages: 0,
+      selectedParentSlice: null
     }
   },
   directives: {
@@ -344,6 +404,26 @@ export default {
     await this.loadTasks()
   },
   computed: {
+    isSubTaskMode() {
+      return Boolean(this.categoryFilter || this.waylineFilter)
+    },
+    isCurrentParentTask() {
+      return this.isParentTask(this.currentTask)
+    },
+    currentTaskTotalImages() {
+      const n = Number(this.currentTask?.total_images)
+      if (Number.isFinite(n)) return n
+      if (this.isCurrentParentTask && this.parentDonutSeries.length) return this.parentDonutTotalImages
+      return 0
+    },
+    currentTaskAlarmCount() {
+      const n = Number(this.currentTask?.alarm_count)
+      if (Number.isFinite(n)) return n
+      if (this.isCurrentParentTask && this.parentDonutSeries.length) {
+        return this.parentDonutSeries.reduce((sum, item) => sum + Number(item.alarm_count || 0), 0)
+      }
+      return 0
+    },
     filteredWaylines() {
       if (!this.categoryFilter) {
         return this.waylines
@@ -366,6 +446,68 @@ export default {
     }
   },
   methods: {
+    resetFilters() {
+      this.searchQuery = ''
+      this.statusFilter = ''
+      this.categoryFilter = ''
+      this.waylineFilter = ''
+      this.activeDropdown = ''
+      this.currentPage = 1
+      this.loadTasks()
+    },
+    isParentTask(task) {
+      if (!task) return false
+      if (typeof task.is_parent_task === 'boolean') return task.is_parent_task
+      return !task.parent_task
+    },
+    getPercent(part, total) {
+      if (!total || total <= 0) return '0%'
+      const pct = (Number(part || 0) / total) * 100
+      return pct.toFixed(2) + '%'
+    },
+    buildParentDonutSeries(subTasks) {
+      const palette = ['#00d4ff', '#3b82f6', '#10b981', '#f59e0b', '#a855f7', '#ef4444', '#22c55e', '#eab308']
+      const normalized = (subTasks || [])
+        .map((t, idx) => {
+          const total_images = Number(t.total_images || 0)
+          const alarm_count = Number(t.alarm_count || 0)
+          return {
+            id: t.id ?? idx,
+            name: t.display_name || t.dji_task_name || t.external_task_id || `任务-${t.id ?? idx}`,
+            value: total_images,
+            color: palette[idx % palette.length],
+            total_images,
+            alarm_count
+          }
+        })
+        .filter(item => item.total_images > 0)
+
+      this.parentDonutSeries = normalized
+      this.parentDonutTotalImages = normalized.reduce((sum, item) => sum + Number(item.total_images || 0), 0)
+    },
+    async ensureParentDonut(task) {
+      this.parentDonutSeries = []
+      this.parentDonutTotalImages = 0
+      this.selectedParentSlice = null
+
+      const list = Array.isArray(task?.sub_tasks_list) ? task.sub_tasks_list : null
+      if (list && list.length) {
+        this.buildParentDonutSeries(list)
+        return
+      }
+      try {
+        const res = await inspectTaskApi.getSubTasks(task.id)
+        const subTasks = Array.isArray(res) ? res : (res?.results || [])
+        this.buildParentDonutSeries(subTasks)
+      } catch (e) {
+        this.parentDonutSeries = []
+        this.parentDonutTotalImages = 0
+      }
+    },
+    handleParentSegmentClick(item) {
+      this.selectedParentSlice = item
+      ElMessage.info(`${item.name} 异常率 ${this.calculateAnomalyRate(item.alarm_count, item.total_images)}`)
+    },
     handleCategoryChange() {
       this.waylineFilter = '' // Reset wayline filter
       this.currentPage = 1
@@ -388,16 +530,19 @@ export default {
     selectStatus(status) {
       this.statusFilter = status
       this.activeDropdown = ''
+      this.currentPage = 1
       this.loadTasks()
     },
     selectCategory(category) {
       this.categoryFilter = category
       this.activeDropdown = ''
+      this.currentPage = 1
       this.handleCategoryChange()
     },
     selectWayline(id) {
       this.waylineFilter = id
       this.activeDropdown = ''
+      this.currentPage = 1
       this.loadTasks()
     },
     // 获取显示标签
@@ -456,29 +601,31 @@ export default {
           page_size: this.pageSize
         }
 
-        // 🔥 检测类型筛选逻辑：如果选了类型，只显示子任务
-        if (this.categoryFilter) {
+        // 🔥 子任务模式：选了检测类型或航线 -> 查子任务；否则查父任务
+        if (this.isSubTaskMode) {
           // 先获取检测类型的 ID
-          const alarmApi = await import('../api/alarmApi')
-          const categoryRes = await alarmApi.default.getAlarmCategories({ page_size: 100 })
-          const categories = Array.isArray(categoryRes) ? categoryRes : (categoryRes?.results || [])
-          const normalizeCode = (code) => {
-            const v = (code || '').toString().toLowerCase().trim()
-            if (v === 'rail' || v === 'track') return 'rail'
-            if (v === 'contactline' || v === 'catenary' || v === 'overhead' || v === 'insulator' || v === 'pole') return 'contactline'
-            if (v === 'bridge') return 'bridge'
-            if (v === 'protected_area' || v === 'protection_zone' || v === 'protection_area') return 'protected_area'
-            return v
-          }
-          const targetCategory = categories.find(c => normalizeCode(c.code) === this.categoryFilter)
+          if (this.categoryFilter) {
+            const alarmApi = await import('../api/alarmApi')
+            const categoryRes = await alarmApi.default.getAlarmCategories({ page_size: 100 })
+            const categories = Array.isArray(categoryRes) ? categoryRes : (categoryRes?.results || [])
+            const normalizeCode = (code) => {
+              const v = (code || '').toString().toLowerCase().trim()
+              if (v === 'rail' || v === 'track') return 'rail'
+              if (v === 'contactline' || v === 'catenary' || v === 'overhead' || v === 'insulator' || v === 'pole') return 'contactline'
+              if (v === 'bridge') return 'bridge'
+              if (v === 'protected_area' || v === 'protection_zone' || v === 'protection_area') return 'protected_area'
+              return v
+            }
+            const targetCategory = categories.find(c => normalizeCode(c.code) === this.categoryFilter)
 
-          if (targetCategory) {
-            params.detect_category = targetCategory.id
-            params.parent_task__isnull = false // 🔥 只查询子任务
+            if (targetCategory) {
+              params.detect_category = targetCategory.id
+            }
           }
+          params.parent_task__isnull = 'false'
         } else {
           // 没选类型，只显示父任务
-          params.parent_task__isnull = true
+          params.parent_task__isnull = 'true'
         }
 
         if (this.statusFilter) {
@@ -495,8 +642,8 @@ export default {
 
         const response = await inspectTaskApi.getInspectTasks(params)
 
-        // 🔥 修复：后端已经根据 parent_task__isnull 过滤了，前端直接使用
-        this.tasks = response?.results || []
+        const results = response?.results || []
+        this.tasks = this.isSubTaskMode ? results.filter(t => t?.parent_task != null) : results
         this.totalTasks = response?.count || 0
         this.filteredTasks = this.tasks
 
@@ -550,9 +697,16 @@ export default {
       this.loadTasks()
     },
     
-    viewTaskDetail(task) {
+    async viewTaskDetail(task) {
       this.currentTask = task
       this.showDetailDialog = true
+      if (this.isParentTask(task)) {
+        await this.ensureParentDonut(task)
+      } else {
+        this.parentDonutSeries = []
+        this.parentDonutTotalImages = 0
+        this.selectedParentSlice = null
+      }
     },
 
     async viewSubTasks(task) {
@@ -627,6 +781,11 @@ export default {
       }
     },
     
+    calculateAnomalyRate(alarmCount, totalImages) {
+      if (!totalImages || totalImages <= 0) return '0%'
+      const rate = ((alarmCount || 0) / totalImages) * 100
+      return rate.toFixed(2) + '%'
+    },
     playbackSubTask(subTask) {
       // 跳转到轮播检测页，并传递任务信息
       this.$router.push({
@@ -718,8 +877,8 @@ export default {
 
 .search-wrapper {
   position: relative;
-  flex: 1;
-  min-width: 250px;
+  flex: 1 1 360px;
+  min-width: 260px;
 }
 
 /* 移除旧的 search-icon 样式 */
@@ -748,8 +907,8 @@ export default {
 }
 
 /* 航线筛选特殊宽度 */
-.custom-select-wrapper:last-child {
-  min-width: 240px;
+.custom-select-wrapper.wayline-select {
+  min-width: 320px;
 }
 
 .custom-select-trigger {
@@ -1060,6 +1219,15 @@ export default {
   font-size: 12px;
 }
 
+.alarm-count-text {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.alarm-count-text.has-alarm {
+  color: #ef4444;
+}
+
 /* 操作按钮 */
 .action-buttons {
   display: flex;
@@ -1250,6 +1418,20 @@ export default {
   font-size: 14px;
 }
 
+.clear-all-btn {
+  margin-left: auto;
+  padding: 8px 16px;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #3b82f6;
+}
+
+.clear-all-btn:hover {
+  background: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
 .total-pages {
   color: #94a3b8;
   font-size: 13px;
@@ -1269,8 +1451,16 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: auto;
+  padding: 24px;
   z-index: 99999;
   animation: fadeIn 0.3s ease;
+}
+
+@media (max-width: 720px) {
+  .modal-overlay {
+    padding: 16px;
+  }
 }
 
 @keyframes fadeIn {
@@ -1292,6 +1482,18 @@ export default {
 
 .detail-modal {
   max-width: 700px;
+  max-height: none;
+  overflow-y: visible;
+}
+
+.detail-modal--child {
+  max-width: 560px;
+  width: min(92vw, 520px);
+}
+
+.detail-modal--parent {
+  max-width: 640px;
+  width: min(92vw, 640px);
 }
 
 .wide-modal {
@@ -1315,6 +1517,10 @@ export default {
   align-items: center;
   padding: 24px 28px;
   border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.detail-modal .modal-header {
+  padding: 18px 20px;
 }
 
 .modal-title {
@@ -1351,6 +1557,10 @@ export default {
   padding: 28px;
 }
 
+.detail-modal .modal-body {
+  padding: 18px 20px;
+}
+
 .subtask-body {
   padding: 0;
   max-height: 60vh;
@@ -1365,7 +1575,105 @@ export default {
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.parent-chart-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.parent-chart-wrap {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.parent-chart-legend {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.legend-item {
+  display: grid;
+  grid-template-columns: 10px 1fr 64px 76px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.legend-name {
+  color: #e2e8f0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legend-value {
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: right;
+}
+
+.legend-percent {
+  color: #3b82f6;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.parent-chart-selected {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selected-name {
+  color: #e2e8f0;
+  font-weight: 700;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-rate {
+  color: #3b82f6;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.selected-meta {
+  color: #94a3b8;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .detail-item {

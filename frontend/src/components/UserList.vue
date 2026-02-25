@@ -14,15 +14,16 @@
       
       <!-- 功能按钮组 - 紧凑设计 -->
       <div class="action-buttons-group">
-        <button @click="exportSuspiciousImages" class="icon-btn-premium warning-gradient" title="导出存疑记录">
+        <button @click="exportSuspiciousImages" class="add-user-btn-premium" title="导出存疑记录">
           <span class="btn-icon">⬇</span>
+          <span class="btn-text">导出存疑记录</span>
         </button>
-        <button @click="exportInspectionReport" class="icon-btn-premium success-gradient" title="导出检测报表">
+        <!-- <button @click="exportInspectionReport" class="icon-btn-premium success-gradient" title="导出检测报表">
           <span class="btn-icon">📊</span>
-        </button>
-        <button @click="handleManualDetect" class="icon-btn-premium purple-gradient" title="手动检测">
+        </button> -->
+        <!-- <button @click="handleManualDetect" class="icon-btn-premium purple-gradient" title="手动检测">
           <span class="btn-icon">🛠️</span>
-        </button>
+        </button> -->
         <button @click="showAddUserDialog" class="add-user-btn-premium" title="添加用户">
           <span class="btn-icon">+</span>
           <span class="btn-text">添加</span>

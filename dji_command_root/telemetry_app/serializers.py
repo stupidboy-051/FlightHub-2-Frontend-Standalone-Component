@@ -330,6 +330,8 @@ class InspectTaskSerializer(serializers.ModelSerializer):
                 'wayline_name': task.wayline.name if task.wayline else None,
                 'device_sn': task.device_sn,
                 'created_at': task.created_at,
+                'alarm_count': self.get_alarm_count(task),  # 🔥 新增：异常数
+                'total_images': self.get_total_images(task),  # 🔥 新增：图片总数
             }
             for task in sub_tasks
         ]
