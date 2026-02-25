@@ -23,7 +23,6 @@
       <div class="grid-col left-col">
         <div class="panel-header">
           <h2 class="panel-title">
-            <span class="icon">🏭</span>
             机场监控
           </h2>
         </div>
@@ -36,7 +35,6 @@
       <div class="grid-col right-col">
         <div class="panel-header">
           <h2 class="panel-title">
-            <span class="icon">👥</span>
             人员管理
           </h2>
         </div>

@@ -15,18 +15,18 @@
           </div>
         </div>
         <div class="header-actions" style="display: flex; gap: 12px;">
-          <button @click="exportSuspiciousImages" class="add-user-btn-premium" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);">
+          <button @click="exportSuspiciousImages" class="add-user-btn-premium">
             <span class="btn-icon" style="font-size: 16px;">⬇</span>
             导出存疑记录
           </button>
-          <button @click="exportInspectionReport" class="add-user-btn-premium" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);">
+          <!-- <button @click="exportInspectionReport" class="add-user-btn-premium" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);">
             <span class="btn-icon" style="font-size: 16px;">📊</span>
             导出检测报表
-          </button>
-          <button @click="handleManualDetect" class="add-user-btn-premium" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);">
+          </button> -->
+          <!-- <button @click="handleManualDetect" class="add-user-btn-premium" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);">
             <span class="btn-icon" style="font-size: 16px;">�️</span>
             手动检测
-          </button>
+          </button> -->
           <button @click="showAddUserDialog" class="add-user-btn-premium">
             <span class="btn-icon">+</span>
             添加用户
