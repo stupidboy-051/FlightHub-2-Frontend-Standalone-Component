@@ -1284,11 +1284,40 @@ export default {
     },
     async loadAnalysisWaylines() {
       if (!this.selectedDetectType?.code || this.analysisWaylineLoading) return;
+      const detectTypeCode = this.selectedDetectType.code;
       this.analysisWaylineLoading = true;
       this.analysisWaylineError = '';
       try {
-        const response = await waylineApi.getWaylines({ detect_type: this.selectedDetectType.code });
-        this.analysisWaylines = Array.isArray(response) ? response : (response.results || response.data || []);
+        let page = 1;
+        let hasNext = true;
+        const allWaylines = [];
+        const seen = new Set();
+
+        while (hasNext) {
+          const response = await waylineApi.getWaylines({
+            detect_type: detectTypeCode,
+            page
+          });
+          const list = Array.isArray(response) ? response : (response.results || response.data || []);
+          if (!Array.isArray(list)) break;
+
+          list.forEach(item => {
+            const key = item?.id ? `id:${item.id}` : `wayline:${item?.wayline_id || item?.name || ''}`;
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            allWaylines.push(item);
+          });
+
+          if (Array.isArray(response) || !response?.next) {
+            hasNext = false;
+          } else {
+            page += 1;
+          }
+        }
+
+        if (this.selectedDetectType?.code !== detectTypeCode) return;
+        this.analysisWaylines = allWaylines;
+        console.log('[Dashboard] 航线列表加载完成:', detectTypeCode, this.analysisWaylines.length);
       } catch (error) {
         console.error('获取航线列表失败:', error);
         this.analysisWaylines = [];
@@ -1825,10 +1854,10 @@ export default {
           position: this.dronePositionProperty,
           orientation: this.droneOrientationProperty,
           model: {
-            uri: '/models/fly.glb',
+            uri: '/models/fly2.glb',
             minimumPixelSize: 128,
             maximumScale: 2000,
-            scale: 1.0,
+            scale: 0.5,
             runAnimations: true
           }
         })

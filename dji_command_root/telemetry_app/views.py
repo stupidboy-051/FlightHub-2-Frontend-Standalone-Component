@@ -56,7 +56,7 @@ from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse, Http404
 from django.utils._os import safe_join
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
@@ -4541,6 +4541,95 @@ class FlightTaskInfoViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({})
         serializer = self.get_serializer(task)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="stats-by-range")
+    def stats_by_range(self, request):
+        """
+        按时间范围聚合飞行任务统计（按 dock_sn 分组，当前以 sn 字段作为 dock_sn 来源）
+        GET /api/v1/flight-task-info/stats-by-range/?days=30
+        """
+        try:
+            days = int(request.query_params.get("days", 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(days, 1)
+
+        start, end = resolve_window(days)
+        queryset = FlightTaskInfo.objects.filter(created_at__range=(start, end))
+        dock_field = "dock_sn" if any(field.name == "dock_sn" for field in FlightTaskInfo._meta.fields) else "sn"
+
+        totals = queryset.aggregate(
+            total_tasks=Count("id"),
+            total_distance=Sum("flight_distance"),
+            total_duration=Sum("flight_duration"),
+        )
+
+        grouped_rows = list(
+            queryset.exclude(**{f"{dock_field}__isnull": True})
+            .exclude(**{dock_field: ""})
+            .values(dock_field)
+            .annotate(
+                task_count=Count("id"),
+                total_distance=Sum("flight_distance"),
+                total_duration=Sum("flight_duration"),
+            )
+            .order_by("-task_count", dock_field)
+        )
+
+        dock_rows = list(DockStatus.objects.values("dock_sn", "dock_name"))
+        by_airport = []
+        by_airport_map = {}
+
+        for dock in dock_rows:
+            dock_sn = str(dock.get("dock_sn") or "").strip()
+            if not dock_sn or dock_sn in by_airport_map:
+                continue
+            entry = {
+                "dock_sn": dock_sn,
+                "name": dock.get("dock_name") or dock_sn,
+                "taskCount": 0,
+                "distanceKm": 0.0,
+                "durationHours": 0.0,
+            }
+            by_airport_map[dock_sn] = entry
+            by_airport.append(entry)
+
+        for row in grouped_rows:
+            dock_sn = str(row.get(dock_field) or "").strip()
+            if not dock_sn:
+                continue
+            entry = by_airport_map.get(dock_sn)
+            if not entry:
+                entry = {
+                    "dock_sn": dock_sn,
+                    "name": dock_sn,
+                    "taskCount": 0,
+                    "distanceKm": 0.0,
+                    "durationHours": 0.0,
+                }
+                by_airport_map[dock_sn] = entry
+                by_airport.append(entry)
+            distance_km = round(float(row.get("total_distance") or 0.0), 2)
+            duration_hours = round(float(row.get("total_duration") or 0.0) / 3600.0, 2)
+            entry["taskCount"] = int(row.get("task_count") or 0)
+            entry["distanceKm"] = distance_km
+            entry["durationHours"] = duration_hours
+
+        by_airport.sort(key=lambda item: (-int(item.get("taskCount") or 0), str(item.get("name") or item.get("dock_sn") or "")))
+
+        return Response(
+            {
+                "range_days": days,
+                "totalTasks": int(totals.get("total_tasks") or 0),
+                "distanceKm": round(float(totals.get("total_distance") or 0.0), 2),
+                "durationHours": round(float(totals.get("total_duration") or 0.0) / 3600.0, 2),
+                "byAirport": by_airport,
+                "window": {
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                },
+            }
+        )
 
 
 class DronePositionViewSet(viewsets.ReadOnlyModelViewSet):

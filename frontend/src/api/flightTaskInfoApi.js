@@ -45,6 +45,14 @@ export default {
       throw error
     }
   },
+  async getFlightStatsByRange(params = {}) {
+    try {
+      return await api.get('/flight-task-info/stats-by-range/', { params })
+    } catch (error) {
+      console.error('Failed to fetch flight stats by range:', error)
+      throw error
+    }
+  },
   async updateFlightStats(taskUuid, payload = {}) {
     if (!taskUuid) return {}
     try {

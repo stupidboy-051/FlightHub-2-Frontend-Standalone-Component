@@ -112,6 +112,57 @@ function normalizeDashboardStatsResponse(res, fallbackWindow) {
   return { total, series, window, computedAt: res.computed_at ?? res.computedAt ?? null }
 }
 
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+
+function normalizeFlightStatsResponse(res, fallbackWindow) {
+  if (!res) {
+    return {
+      totalTasks: 0,
+      byAirport: [],
+      distanceKm: 0,
+      durationHours: 0,
+      window: fallbackWindow || null
+    }
+  }
+
+  const byAirportRaw = Array.isArray(res.byAirport) ? res.byAirport : []
+  const byAirport = byAirportRaw.map(item => {
+    const dockSn = resolveDockSn(item) || resolveTaskDockSn(item)
+    const taskCount = Number(item?.taskCount ?? item?.task_count ?? 0)
+    const distanceKm = Number(item?.distanceKm ?? item?.distance_km ?? 0)
+    const durationHours = Number(item?.durationHours ?? item?.duration_hours ?? 0)
+    return {
+      dockSn,
+      dock_sn: dockSn,
+      name: item?.name || dockSn || '未知机场',
+      taskCount: Number.isFinite(taskCount) ? taskCount : 0,
+      distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : 0,
+      durationHours: Number.isFinite(durationHours) ? Number(durationHours.toFixed(2)) : 0
+    }
+  })
+
+  const fallbackTotalTasks = byAirport.reduce((sum, item) => sum + (Number(item.taskCount) || 0), 0)
+  const fallbackDistanceKm = byAirport.reduce((sum, item) => sum + (Number(item.distanceKm) || 0), 0)
+  const fallbackDurationHours = byAirport.reduce((sum, item) => sum + (Number(item.durationHours) || 0), 0)
+
+  const totalTasks = Number(res.totalTasks ?? res.total_tasks ?? fallbackTotalTasks)
+  const distanceKm = Number(res.distanceKm ?? res.distance_km ?? fallbackDistanceKm)
+  const durationHours = Number(res.durationHours ?? res.duration_hours ?? fallbackDurationHours)
+  const window = res.window || fallbackWindow || null
+
+  return {
+    totalTasks: Number.isFinite(totalTasks) ? totalTasks : fallbackTotalTasks,
+    byAirport,
+    distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : Number(fallbackDistanceKm.toFixed(2)),
+    durationHours: Number.isFinite(durationHours) ? Number(durationHours.toFixed(2)) : Number(fallbackDurationHours.toFixed(2)),
+    window,
+    rangeDays: Number(res.range_days ?? res.rangeDays ?? 0) || null
+  }
+}
+
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0)
 }
@@ -382,8 +433,8 @@ function buildDockTaskStats(dockRes, taskList) {
       dockSn,
       name: resolveDockName(dock),
       taskCount: 0,
-      distanceKm: null,
-      durationHours: null
+      distanceKm: 0,
+      durationHours: 0
     }
     indexBySn.set(dockSn, entry)
     byAirport.push(entry)
@@ -393,10 +444,29 @@ function buildDockTaskStats(dockRes, taskList) {
     taskList.forEach(task => {
       const dockSn = resolveTaskDockSn(task)
       if (!dockSn) return
-      const entry = indexBySn.get(dockSn)
-      if (entry) entry.taskCount += 1
+      let entry = indexBySn.get(dockSn)
+      if (!entry) {
+        entry = {
+          dockSn,
+          name: dockSn,
+          taskCount: 0,
+          distanceKm: 0,
+          durationHours: 0
+        }
+        indexBySn.set(dockSn, entry)
+        byAirport.push(entry)
+      }
+      entry.taskCount += 1
+      entry.distanceKm += toFiniteNumber(task?.flight_distance ?? task?.flightDistance, 0)
+      entry.durationHours += toFiniteNumber(task?.flight_duration ?? task?.flightDuration, 0) / 3600
     })
   }
+
+  byAirport.forEach(item => {
+    item.distanceKm = Number(toFiniteNumber(item.distanceKm, 0).toFixed(2))
+    item.durationHours = Number(toFiniteNumber(item.durationHours, 0).toFixed(2))
+  })
+  byAirport.sort((a, b) => (b.taskCount || 0) - (a.taskCount || 0))
 
   return byAirport
 }
@@ -517,25 +587,38 @@ export default {
   },
 
   async getFlightStatsByRange({ days = 30 } = {}) {
-    const { start, end } = resolveRangeWindow(days)
-    const [dockRes, taskRes] = await Promise.all([
-      dockStatusApi.getAllDocks(),
-      fetchAllFlightTasksByPaging({
-        page_size: 2000,
-        ordering: '-created_at',
-        start_date: formatDateParam(start),
-        end_date: formatDateParam(end)
-      })
-    ])
-    const list = taskRes.collected || []
-    const totalTasks = typeof taskRes.totalCount === 'number' ? taskRes.totalCount : list.length
-    const byAirport = buildDockTaskStats(dockRes, list)
-    return {
-      totalTasks,
-      byAirport,
-      distanceKm: null,
-      durationHours: null,
-      window: { start, end }
+    const fallbackWindow = resolveRangeWindow(days)
+    try {
+      const res = await flightTaskInfoApi.getFlightStatsByRange({ days })
+      const normalized = normalizeFlightStatsResponse(res, fallbackWindow)
+      if (!normalized.byAirport || normalized.byAirport.length === 0) {
+        const dockRes = await dockStatusApi.getAllDocks()
+        normalized.byAirport = buildDockTaskStats(dockRes, [])
+      }
+      return normalized
+    } catch (error) {
+      const { start, end } = fallbackWindow
+      const [dockRes, taskRes] = await Promise.all([
+        dockStatusApi.getAllDocks(),
+        fetchAllFlightTasksByPaging({
+          page_size: 2000,
+          ordering: '-created_at',
+          start_date: formatDateParam(start),
+          end_date: formatDateParam(end)
+        })
+      ])
+      const list = taskRes.collected || []
+      const totalTasks = typeof taskRes.totalCount === 'number' ? taskRes.totalCount : list.length
+      const byAirport = buildDockTaskStats(dockRes, list)
+      const distanceKm = byAirport.reduce((sum, item) => sum + toFiniteNumber(item.distanceKm, 0), 0)
+      const durationHours = byAirport.reduce((sum, item) => sum + toFiniteNumber(item.durationHours, 0), 0)
+      return {
+        totalTasks,
+        byAirport,
+        distanceKm: Number(distanceKm.toFixed(2)),
+        durationHours: Number(durationHours.toFixed(2)),
+        window: fallbackWindow
+      }
     }
   },
   async getAlertWaylineStats({ days = 30, months = null, topN = 6 } = {}) {
@@ -561,9 +644,15 @@ export default {
 
     const waylineList = normalizeList(waylinesRes)
     const waylineNameMap = waylineList.reduce((map, item) => {
-      const id = item?.wayline_id ?? item?.id
-      if (id !== undefined && id !== null) {
-        map[id] = item?.name || `航线${id}`
+      const name = item?.name || ''
+      const dbId = item?.id
+      const bizId = item?.wayline_id
+
+      if (dbId !== undefined && dbId !== null && String(dbId) !== '') {
+        map[dbId] = name || map[dbId] || `航线${dbId}`
+      }
+      if (bizId !== undefined && bizId !== null && String(bizId) !== '') {
+        map[bizId] = name || map[bizId] || `航线${bizId}`
       }
       return map
     }, {})

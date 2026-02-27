@@ -967,7 +967,30 @@ initCesiumMap() {
       this.loading.flightStats = true
       this.errors.flightStats = ''
       try {
-        this.flightStats = await homeDashboardApi.getFlightStatsByRange({ days: this.rangeToDays(this.flightRange) })
+        const res = await homeDashboardApi.getFlightStatsByRange({ days: this.rangeToDays(this.flightRange) })
+        const byAirport = Array.isArray(res?.byAirport)
+          ? res.byAirport.map(item => {
+            const taskCount = Number(item?.taskCount ?? 0)
+            const distanceKm = Number(item?.distanceKm)
+            const durationHours = Number(item?.durationHours)
+            const dockSn = item?.dockSn || item?.dock_sn || ''
+            return {
+              dockSn,
+              dock_sn: dockSn,
+              name: item?.name || dockSn || '未知机场',
+              taskCount: Number.isFinite(taskCount) ? taskCount : 0,
+              distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
+              durationHours: Number.isFinite(durationHours) ? Number(durationHours.toFixed(2)) : null
+            }
+          })
+          : []
+        this.flightStats = {
+          totalTasks: Number(res?.totalTasks ?? 0) || 0,
+          byAirport,
+          distanceKm: Number.isFinite(Number(res?.distanceKm)) ? Number(Number(res?.distanceKm).toFixed(2)) : null,
+          durationHours: Number.isFinite(Number(res?.durationHours)) ? Number(Number(res?.durationHours).toFixed(2)) : null,
+          window: res?.window || null
+        }
       } catch (e) {
         this.flightStats = {
           totalTasks: 0,
@@ -1023,8 +1046,10 @@ initCesiumMap() {
         return unit ? `--${unit}` : '--'
       }
       const numeric = Number(value)
-      const display = Number.isFinite(numeric) ? numeric : value
-      return unit ? `${display}${unit}` : String(display)
+      if (!Number.isFinite(numeric)) {
+        return unit ? `--${unit}` : '--'
+      }
+      return unit ? `${numeric.toFixed(2)}${unit}` : numeric.toFixed(2)
     },
     getRangeLabel(range) {
       const opt = this.rangeOptions.find(item => item.value === range)
