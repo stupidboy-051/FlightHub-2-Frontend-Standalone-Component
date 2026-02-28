@@ -2011,7 +2011,7 @@ export default {
         snapshot = this.buildFlightStatsSnapshot()
         this.flightStatsByDock[key] = { ...snapshot }
       }
-      if (!snapshot) return false
+      if (!snapshot) return true
       let taskUuid = snapshot.flightStatsTaskUuid
       if (!taskUuid && this.isDockSelected(dock) && this.currentTaskUuid) {
         taskUuid = this.currentTaskUuid
@@ -2023,44 +2023,21 @@ export default {
           this.flightStatsByDock[key] = snapshot
         }
       }
-      if (!taskUuid) return false
       if (snapshot.flightStatsSaving) return false
-      if (snapshot.flightStatsSavedTaskUuid === taskUuid) return false
-      if (!snapshot.flightStartTimestamp) return false
+      if (!snapshot.flightStartTimestamp) return true
 
       const endTime = snapshot.flightLastUpdateTimestamp || Date.now()
       const durationMs = Math.max(0, endTime - snapshot.flightStartTimestamp)
-      const durationSeconds = Math.max(0, Math.floor(durationMs / 1000))
-      const distanceKm = Number.isFinite(snapshot.flightDistanceKm) ? snapshot.flightDistanceKm : 0
-
       snapshot.flightDurationMs = durationMs
-      snapshot.flightStatsSaving = true
+      snapshot.flightStatsSaving = false
+      if (taskUuid) {
+        snapshot.flightStatsSavedTaskUuid = taskUuid
+      }
       this.flightStatsByDock[key] = snapshot
       if (this.isDockSelected(dock)) {
         this.applyFlightStatsSnapshot(snapshot)
       }
-      try {
-        await flightTaskInfoApi.updateFlightStats(taskUuid, {
-          task_uuid: taskUuid,
-          flight_duration: durationSeconds,
-          flight_distance: distanceKm
-        })
-        snapshot.flightStatsSavedTaskUuid = taskUuid
-        this.flightStatsByDock[key] = snapshot
-        if (this.isDockSelected(dock)) {
-          this.applyFlightStatsSnapshot(snapshot)
-        }
-        return true
-      } catch (error) {
-        console.error('保存飞行统计失败:', error)
-        return false
-      } finally {
-        snapshot.flightStatsSaving = false
-        this.flightStatsByDock[key] = snapshot
-        if (this.isDockSelected(dock)) {
-          this.applyFlightStatsSnapshot(snapshot)
-        }
-      }
+      return true
     },
     resetFlightStats(dock = this.selectedDock) {
       const cleared = this.getEmptyFlightStats()
@@ -2236,6 +2213,7 @@ export default {
           return
         }
         this.currentTaskInfo = taskInfo
+        this.syncFlightStatsFromTaskInfo(taskInfo, this.selectedDock)
         const params = this.parseTaskParams(taskInfo.params)
         this.updateProtectedTaskContext(taskInfo, params)
         if (this.isTaskFinished(taskInfo, params)) {
@@ -2314,6 +2292,62 @@ export default {
         if (value) return value
       }
       return ''
+    },
+    syncFlightStatsFromTaskInfo(taskInfo, dock = this.selectedDock) {
+      if (!dock || !taskInfo) return
+      const key = this.getFlightStatsKey(dock)
+      if (!key) return
+
+      const durationSeconds = this.toNumber(taskInfo?.flight_duration ?? taskInfo?.flightDuration)
+      const distanceKm = this.toNumber(taskInfo?.flight_distance ?? taskInfo?.flightDistance)
+      const hasDuration = Number.isFinite(durationSeconds) && durationSeconds >= 0
+      const hasDistance = Number.isFinite(distanceKm) && distanceKm >= 0
+      if (!hasDuration && !hasDistance) return
+
+      const params = this.parseTaskParams(taskInfo?.params)
+      const taskUuid = this.getTaskUuidFromTaskInfo(taskInfo, params)
+      const isActive = taskInfo?.flight_active === true || taskInfo?.flight_active === 1 || taskInfo?.flight_active === '1'
+
+      if (!isActive && hasDuration && hasDistance && durationSeconds === 0 && distanceKm === 0) {
+        const cleared = this.getEmptyFlightStats()
+        if (taskUuid) {
+          cleared.flightStatsTaskUuid = taskUuid
+          cleared.flightStatsSavedTaskUuid = taskUuid
+        }
+        this.flightStatsByDock[key] = { ...cleared }
+        if (this.isDockSelected(dock)) {
+          this.applyFlightStatsSnapshot(cleared)
+        }
+        return
+      }
+
+      const snapshot = this.flightStatsByDock[key]
+        ? { ...this.flightStatsByDock[key] }
+        : this.getEmptyFlightStats()
+      const now = Date.now()
+
+      if (hasDuration) {
+        const durationMs = Math.max(0, Math.floor(durationSeconds * 1000))
+        snapshot.flightDurationMs = durationMs
+        if (durationMs > 0 || isActive || (hasDistance && distanceKm > 0)) {
+          snapshot.flightStartTimestamp = now - durationMs
+          snapshot.flightLastUpdateTimestamp = now
+        }
+      }
+      if (hasDistance) {
+        snapshot.flightDistanceKm = Math.max(0, distanceKm)
+      }
+      if (taskUuid) {
+        snapshot.flightStatsTaskUuid = taskUuid
+        if (!isActive) {
+          snapshot.flightStatsSavedTaskUuid = taskUuid
+        }
+      }
+
+      this.flightStatsByDock[key] = snapshot
+      if (this.isDockSelected(dock)) {
+        this.applyFlightStatsSnapshot(snapshot)
+      }
     },
     async resolveTaskUuidForDock(dock) {
       const dockSn = dock?.dock_sn

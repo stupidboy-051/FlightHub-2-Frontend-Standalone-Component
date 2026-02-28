@@ -11,6 +11,7 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import datetime
 import urllib3
+from telemetry_app.flight_stats_tracker import finalize_session_for_device, refresh_session_with_position
 
 # 禁用 HTTPS 不安全警告 (针对私有化部署自签名证书)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -382,7 +383,7 @@ class Command(BaseCommand):
 
             # 保存无人机位置
             if lat is not None and lon is not None:
-                DronePosition.objects.create(
+                position = DronePosition.objects.create(
                     device_sn=sn,  # 修正变量名
                     latitude=lat,
                     longitude=lon,
@@ -391,6 +392,7 @@ class Command(BaseCommand):
                     timestamp=timezone.now(),
                     mqtt_topic=topic
                 )
+                refresh_session_with_position(position)
                 print(f"   ✅ [DEBUG] 无人机位置写入成功！{sn} -> ({lat}, {lon})")
             else:
                 print(f"   ⚠️ [DEBUG] 无法写入: 经纬度缺失 (lat={lat}, lon={lon})")
@@ -529,6 +531,8 @@ class Command(BaseCommand):
             dock.is_online = True
 
             dock.save()
+            if dock.drone_in_dock in (1, "1") and dock.drone_sn:
+                finalize_session_for_device(dock.drone_sn, ended_at=timezone.now())
 
             action = "创建" if created else "更新"
             print(f"   ✅ 机场状态{action}成功！{dock_sn}")

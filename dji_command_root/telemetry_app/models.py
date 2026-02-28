@@ -458,6 +458,34 @@ class FlightTaskInfo(models.Model):
         return f"{self.name} ({self.task_uuid})"
 
 
+class FlightStatsSession(models.Model):
+    """
+    按无人机维度持久化当前飞行统计会话，避免依赖前端页面状态。
+    """
+    device_sn = models.CharField(max_length=100, unique=True, db_index=True, verbose_name="无人机SN")
+    task_uuid = models.CharField(max_length=100, blank=True, default="", verbose_name="关联任务UUID")
+    is_active = models.BooleanField(default=False, verbose_name="是否在飞行会话中")
+
+    flight_started_at = models.DateTimeField(null=True, blank=True, verbose_name="飞行开始时间")
+    last_position_time = models.DateTimeField(null=True, blank=True, verbose_name="最后位置时间")
+    last_latitude = models.FloatField(null=True, blank=True, verbose_name="最后纬度")
+    last_longitude = models.FloatField(null=True, blank=True, verbose_name="最后经度")
+    last_altitude = models.FloatField(null=True, blank=True, verbose_name="最后高度")
+    distance_km = models.FloatField(default=0.0, verbose_name="累计飞行里程(km)")
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "飞行统计会话"
+        verbose_name_plural = "飞行统计会话"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        suffix = f" task={self.task_uuid}" if self.task_uuid else ""
+        return f"{self.device_sn} active={self.is_active}{suffix}"
+
+
 class DockStatus(models.Model):
     """
     机场状态表：存储机场实时状态信息

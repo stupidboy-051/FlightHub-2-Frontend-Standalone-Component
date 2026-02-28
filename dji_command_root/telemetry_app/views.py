@@ -86,6 +86,7 @@ from .serializers import (
 
 from .filters import AlarmFilter, WaylineImageFilter
 from .alarm_dashboard_stats import resolve_window, upsert_alarm_dashboard_stats
+from .flight_stats_tracker import get_realtime_task_stats
 from .permissions import IsSystemAdmin
 from .pagination import StandardResultsSetPagination
 
@@ -4540,7 +4541,12 @@ class FlightTaskInfoViewSet(viewsets.ReadOnlyModelViewSet):
         if not task:
             return Response({})
         serializer = self.get_serializer(task)
-        return Response(serializer.data)
+        payload = dict(serializer.data)
+        realtime = get_realtime_task_stats(task)
+        payload["flight_duration"] = realtime["flight_duration"]
+        payload["flight_distance"] = realtime["flight_distance"]
+        payload["flight_active"] = realtime["flight_active"]
+        return Response(payload)
 
     @action(detail=False, methods=["get"], url_path="stats-by-range")
     def stats_by_range(self, request):
