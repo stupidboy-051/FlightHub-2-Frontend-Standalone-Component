@@ -113,7 +113,7 @@
         </el-form-item>
 
         <!-- 是否为保护区任务 -->
-        <el-form-item label="保护区监测" prop="is_protected_area" class="item-aligned">
+        <el-form-item label="保护区监测" prop="is_protected_area" class="item-aligned" v-if="false">
           <el-switch
             v-model="form.is_protected_area"
             active-text="是"
@@ -355,7 +355,7 @@ export default {
       this.loadingWaylines = true
       try {
         // Assuming getWaylines returns a list or a paginated object
-        const res = await waylineApi.getWaylines({ page_size: 100 })
+        const res = await waylineApi.getWaylinesSelectAll()
         // Adapt based on actual API response structure.
         // Based on waylineApi.js: return response (which is response.data)
         // Usually Django DRF returns { results: [], count: ... } or just []
@@ -1216,4 +1216,3 @@ textarea.el-textarea__inner:focus,
   color: #60a5fa !important;
 }
 </style>
-

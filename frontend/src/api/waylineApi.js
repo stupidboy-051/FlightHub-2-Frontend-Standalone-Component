@@ -43,6 +43,15 @@ export default {
       throw error
     }
   },
+  async getWaylinesSelectAll(params = {}) {
+    try {
+      const response = await api.get('/waylines/select-all/', { params })
+      return response
+    } catch (error) {
+      console.error('获取全量航线列表失败:', error)
+      throw error
+    }
+  },
   async getWaylineTree() {
     try {
       const response = await api.get('/waylines/tree/')

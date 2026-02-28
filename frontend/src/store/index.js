@@ -2,6 +2,14 @@ import { createStore } from 'vuex'
 import droneApi from '../api/droneApi'
 import authApi from '../api/authApi'
 
+const savedUser = (() => {
+  try {
+    return JSON.parse(localStorage.getItem('userInfo') || 'null')
+  } catch (e) {
+    return null
+  }
+})()
+
 export default createStore({
   state: {
     // 无人机航线数据
@@ -36,7 +44,7 @@ export default createStore({
     darkMode: true,
 
     // 用户认证状态
-    user: null,
+    user: savedUser,
     token: localStorage.getItem('token') || null,
     isAuthenticated: !!localStorage.getItem('token'),
     users: [],
@@ -124,6 +132,7 @@ export default createStore({
     SET_USER(state, user) {
       state.user = user
       state.isAuthenticated = true
+      localStorage.setItem('userInfo', JSON.stringify(user))
     },
     SET_TOKEN(state, token) {
       state.token = token
@@ -134,6 +143,7 @@ export default createStore({
       state.token = null
       state.isAuthenticated = false
       localStorage.removeItem('token')
+      localStorage.removeItem('userInfo')
     },
 
     // 用户管理相关mutation
@@ -390,7 +400,7 @@ export default createStore({
     },
 
     isAdmin: (state) => {
-      return state.user && state.user.role === 'admin'
+      return String(state.user?.role || '').toLowerCase() === 'admin'
     },
 
     allUsers: (state) => {

@@ -89,7 +89,7 @@
               </div>
 
               <!-- 第二级：航线 -->
-              <div v-show="isCategoryExpanded(categoryGroup.code)">
+              <div v-show="isCategoryExpanded(categoryGroup.code)" v-if="isCategoryExpanded(categoryGroup.code)">
                 <div
                   class="type-group"
                   v-for="waylineGroup in categoryGroup.waylines"
@@ -105,7 +105,7 @@
                   </div>
 
                   <!-- 第三级：历史任务 -->
-                  <div v-show="isWaylineExpanded(categoryGroup.code, waylineGroup.id)">
+                  <div v-show="isWaylineExpanded(categoryGroup.code, waylineGroup.id)" v-if="isWaylineExpanded(categoryGroup.code, waylineGroup.id)">
                     <div
                       class="task-item-compact clickable"
                       v-for="task in waylineGroup.tasks"
@@ -195,6 +195,9 @@
                     :hide-on-click-modal="true"
                     :preview-teleported="true"
                   >
+                    <template #placeholder>
+                      <div class="image-placeholder">加载中...</div>
+                    </template>
                     <template #error>
                       <div class="image-placeholder">暂无图片</div>
                     </template>
@@ -265,6 +268,9 @@
                   :preview-teleported="true"
                   @error="handleImageError"
                 >
+                  <template #placeholder>
+                    <div class="image-placeholder">加载中...</div>
+                  </template>
                   <template #error>
                     <div class="image-placeholder">
                       {{ imageLoadError ? '图片加载失败' : '暂无图片' }}
@@ -414,6 +420,10 @@ export default {
       expandedWaylines: new Set(),
       selectedHistoryTask: null,
       latestManualTaskId: null,
+      bypassLightTreeRefreshGuard: false,
+      enableTreeLoadOptimization: true,
+      enableLightTreeRefresh: true,
+      treeRequestConcurrency: 3,
       taskProgressMap: {}, // 记录每个任务的播放进度
       imageLoadError: false, // 图片加载失败状态
       useFallbackImage: false, // 是否使用降级图片（原图）
@@ -1438,6 +1448,245 @@ export default {
 
     // ==================== 新增：三级树结构方法 ====================
 
+    async lightRefreshHistoryTree() {
+      try {
+        if (!this.latestManualTaskId) return
+
+        const res = await inspectTaskApi.getInspectTasks({
+          parent_task__isnull: false,
+          page_size: 1,
+          ordering: '-created_at'
+        })
+        const tasks = this.normalizeList(res)
+        const latestTask = tasks[0]
+        if (!latestTask) return
+        if (latestTask.id === this.latestManualTaskId) return
+
+        this.bypassLightTreeRefreshGuard = true
+        await this.loadHistoryTree(true)
+      } finally {
+        this.bypassLightTreeRefreshGuard = false
+      }
+    },
+
+    async loadHistoryTreeOptimized() {
+      const categoryRes = await alarmApi.getAlarmCategories({ page_size: 100 })
+      const categories = this.normalizeList(categoryRes)
+
+      const iconMap = {
+        'rail': '🛤️',
+        'contactline': '⚡',
+        'bridge': '🌉',
+        'protected_area': '🛡️',
+        'catenary': '⚡',
+        'overhead': '⚡',
+        'insulator': '⚡',
+        'pole': '⚡',
+        'protection_zone': '🛡️'
+      }
+
+      const concurrency = Math.max(1, Number(this.treeRequestConcurrency) || 3)
+      const runWithConcurrency = async (jobFactories, limit) => {
+        const results = new Array(jobFactories.length)
+        let nextIndex = 0
+        const workerCount = Math.min(limit, jobFactories.length)
+        const workers = new Array(workerCount).fill(0).map(async () => {
+          while (nextIndex < jobFactories.length) {
+            const cur = nextIndex
+            nextIndex += 1
+            results[cur] = await jobFactories[cur]()
+          }
+        })
+        await Promise.all(workers)
+        return results
+      }
+
+      const categoryJobs = categories.map(category => async () => {
+        const categoryNode = {
+          code: category.code,
+          name: category.name,
+          icon: iconMap[category.code] || '🔍',
+          taskCount: 0,
+          waylines: []
+        }
+
+        const [waylineRes, taskRes] = await Promise.all([
+          waylineApi.getWaylines({
+            detect_type: category.code,
+            page_size: 100
+          }),
+          inspectTaskApi.getInspectTasks({
+            detect_category: String(category.id),
+            parent_task__isnull: 'false',
+            page_size: 500,
+            ordering: '-created_at'
+          })
+        ])
+
+        const waylines = this.normalizeList(waylineRes)
+        const allTasks = this.normalizeList(taskRes)
+
+        const waylineMap = new Map()
+        for (const w of waylines) {
+          waylineMap.set(w.id, {
+            id: w.id,
+            name: w.name,
+            tasks: []
+          })
+        }
+
+        let unboundCount = 0
+        let newestCategoryTask = null
+
+        for (const task of allTasks) {
+          if (task.parent_task === null) continue
+          if (!task.wayline) {
+            unboundCount += 1
+            continue
+          }
+
+          const wId = task.wayline
+          const wName = (task.wayline_details && task.wayline_details.name)
+            ? task.wayline_details.name
+            : (typeof task.external_task_id === 'string' ? task.external_task_id.replace(/^\\d{8}/, '') || `未知航线-${wId}` : `未知航线-${wId}`)
+
+          if (!waylineMap.has(wId)) {
+            waylineMap.set(wId, {
+              id: wId,
+              name: wName,
+              tasks: []
+            })
+          }
+
+          const alarmCount = task.alarm_count || 0
+          const taskWithAlarmCount = {
+            ...task,
+            alarm_count: alarmCount
+          }
+
+          waylineMap.get(wId).tasks.push(taskWithAlarmCount)
+
+          if (!newestCategoryTask || taskWithAlarmCount.id > newestCategoryTask.id) {
+            newestCategoryTask = taskWithAlarmCount
+          }
+        }
+
+        for (const wData of waylineMap.values()) {
+          categoryNode.waylines.push(wData)
+          categoryNode.taskCount += wData.tasks.length
+        }
+
+        if (unboundCount > 0) {
+          categoryNode.taskCount += unboundCount
+        }
+
+        categoryNode.waylines.sort((a, b) => {
+          const countA = a.tasks ? a.tasks.length : 0
+          const countB = b.tasks ? b.tasks.length : 0
+          if (countA > 0 && countB === 0) return -1
+          if (countA === 0 && countB > 0) return 1
+          return 0
+        })
+
+        return { categoryNode, newestCategoryTask }
+      })
+
+      const categoryResults = await runWithConcurrency(categoryJobs, concurrency)
+      const tree = categoryResults.map(item => item.categoryNode)
+
+      let newestGlobalTask = null
+      for (const item of categoryResults) {
+        if (!item.newestCategoryTask) continue
+        if (!newestGlobalTask || item.newestCategoryTask.id > newestGlobalTask.id) {
+          newestGlobalTask = item.newestCategoryTask
+        }
+      }
+
+      try {
+        const uncategorizedTasksRes = await inspectTaskApi.getInspectTasks({
+          detect_category__isnull: 'true',
+          page_size: 100,
+          ordering: '-created_at'
+        })
+        let uncategorizedTasks = this.normalizeList(uncategorizedTasksRes)
+        uncategorizedTasks = uncategorizedTasks.filter(t => t.parent_task !== null)
+
+        if (uncategorizedTasks.length > 0) {
+          const uncatTasks = uncategorizedTasks.map(t => ({
+            ...t,
+            alarm_count: t.alarm_count || 0
+          }))
+
+          const uncatNode = {
+            code: 'uncategorized',
+            name: '未分类/手动上传',
+            icon: '📁',
+            taskCount: uncatTasks.length,
+            waylines: []
+          }
+
+          const uncatWayline = {
+            id: 'manual',
+            name: '手动上传文件夹',
+            tasks: uncatTasks
+          }
+
+          uncatNode.waylines.push(uncatWayline)
+          tree.push(uncatNode)
+
+          for (const t of uncatTasks) {
+            if (!newestGlobalTask || t.id > newestGlobalTask.id) {
+              newestGlobalTask = t
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('获取未分类任务失败:', e)
+      }
+
+      this.detectionTree = tree
+
+      if (newestGlobalTask) {
+        const isNewTask = newestGlobalTask.id !== this.latestManualTaskId
+        const isFirstLoad = !this.latestManualTaskId
+
+        if (isFirstLoad || isNewTask) {
+          this.latestManualTaskId = newestGlobalTask.id
+
+          if (isNewTask && !isFirstLoad) {
+            let targetCategoryCode = null
+            if (newestGlobalTask.detect_category_code) {
+              targetCategoryCode = newestGlobalTask.detect_category_code
+            } else if (newestGlobalTask.detect_category === null) {
+              targetCategoryCode = 'uncategorized'
+            } else {
+              for (const n of tree) {
+                const found = n.waylines?.some(w => w.tasks?.some(t => t.id === newestGlobalTask.id))
+                if (found) {
+                  targetCategoryCode = n.code
+                  break
+                }
+              }
+            }
+
+            if (targetCategoryCode) {
+              this.expandedCategories.add(targetCategoryCode)
+            }
+
+            ElNotification({
+              title: '新任务自动启动',
+              message: `检测到任务 ID: ${newestGlobalTask.id} (${newestGlobalTask.external_task_id})，正在自动切换至可视化界面...`,
+              type: 'success',
+              duration: 5000,
+              position: 'top-right'
+            })
+
+            this.startInspectPlaybackForFolder(newestGlobalTask, false, true)
+          }
+        }
+      }
+    },
+
     // 加载历史任务树
     async loadHistoryTree(silent = false) {
       if (this.treeLoading) return
@@ -1445,6 +1694,16 @@ export default {
       this.treeError = ''
 
       try {
+        if (silent && this.enableLightTreeRefresh && !this.bypassLightTreeRefreshGuard) {
+          await this.lightRefreshHistoryTree()
+          return
+        }
+
+        if (this.enableTreeLoadOptimization) {
+          await this.loadHistoryTreeOptimized()
+          return
+        }
+
         // 1. 获取所有检测类型
         // 🔥 移除 .slice(0, 4) 限制，显示所有配置的检测类型
         const categoryRes = await alarmApi.getAlarmCategories({ page_size: 100 })
@@ -2796,6 +3055,18 @@ export default {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+.slide-image-section .el-image,
+.slide-image-section .el-image__wrapper,
+.slide-image-section .el-image__inner {
+  width: 100%;
+  height: 100%;
+}
+
+.slide-image-section .el-image__wrapper,
+.slide-image-section .el-image__inner {
+  background: transparent;
 }
 
 .slide-image-section img {

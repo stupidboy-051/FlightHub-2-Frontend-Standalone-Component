@@ -33,6 +33,21 @@
           <el-input v-model="form.name" placeholder="请输入任务名称"></el-input>
         </el-form-item>
 
+        <el-form-item label="航线类型">
+          <el-select
+            v-model="selectedWaylineType"
+            class="full-width"
+            placeholder="全部类型"
+            @change="handleWaylineTypeChange"
+          >
+            <el-option label="全部" value="all"></el-option>
+            <el-option label="铁路" value="rail"></el-option>
+            <el-option label="接触网" value="contactline"></el-option>
+            <el-option label="桥梁" value="bridge"></el-option>
+            <el-option label="保护区" value="protected_area"></el-option>
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="选择航线" prop="wayline_uuid">
           <el-select
             v-model="form.wayline_uuid"
@@ -40,13 +55,18 @@
             class="full-width"
             :loading="loadingWaylines"
             filterable
+            :filter-method="handleWaylineFilter"
           >
             <el-option
-              v-for="wayline in waylines"
+              v-for="wayline in filteredWaylines"
               :key="wayline.id"
-              :label="wayline.name"
+              :label="wayline.name || '未命名航线'"
               :value="wayline.wayline_id || wayline.id"
             >
+              <span style="float: left">{{ wayline.name || '未命名航线' }}</span>
+              <span style="float: right; color: #8492a6; font-size: 12px">
+                {{ wayline.wayline_id || wayline.id }}
+              </span>
             </el-option>
           </el-select>
         </el-form-item>
@@ -61,7 +81,7 @@
         </el-form-item>
 
         <!-- 是否为保护区任务 -->
-        <el-form-item label="保护区监测" prop="is_protected_area" class="item-aligned">
+        <el-form-item label="保护区监测" prop="is_protected_area" class="item-aligned" v-if="false">
           <el-switch
             v-model="form.is_protected_area"
             active-text="是"
@@ -175,6 +195,8 @@ export default {
       countdown: 5,
       timer: null,
       waylines: [],
+      waylineKeyword: '',
+      selectedWaylineType: 'all',
       form: {
         is_protected_area: false,
         name: '',
@@ -215,6 +237,22 @@ export default {
       set(value) {
         this.$emit('update:modelValue', value)
       }
+    },
+    filteredWaylines() {
+      const q = (this.waylineKeyword || '').trim().toLowerCase()
+      if (!q) return this.waylines
+      return (this.waylines || []).filter(w => {
+        const name = (w?.name || '').toString().toLowerCase()
+        const waylineId = (w?.wayline_id || '').toString().toLowerCase()
+        const id = (w?.id ?? '').toString().toLowerCase()
+        const detectType = (w?.detect_type || '').toString().toLowerCase()
+        return (
+          name.includes(q) ||
+          waylineId.includes(q) ||
+          id.includes(q) ||
+          detectType.includes(q)
+        )
+      })
     }
   },
   watch: {
@@ -245,8 +283,13 @@ export default {
     },
     async fetchWaylines() {
       this.loadingWaylines = true
+      this.waylineKeyword = ''
       try {
-        const res = await waylineApi.getWaylines({ page_size: 100 })
+        const params = {}
+        if (this.selectedWaylineType && this.selectedWaylineType !== 'all') {
+          params.detect_type = this.selectedWaylineType
+        }
+        const res = await waylineApi.getWaylinesSelectAll(params)
         if (Array.isArray(res)) {
           this.waylines = res
         } else if (res && res.results) {
@@ -259,6 +302,14 @@ export default {
       } finally {
         this.loadingWaylines = false
       }
+    },
+    handleWaylineTypeChange() {
+      this.form.wayline_uuid = ''
+      this.waylineKeyword = ''
+      this.fetchWaylines()
+    },
+    handleWaylineFilter(query) {
+      this.waylineKeyword = query
     },
     submitForm() {
       if (!this.form.sn) {
@@ -450,7 +501,9 @@ export default {
 .task-form-dialog :deep(.el-input__wrapper),
 .task-form-dialog :deep(.el-select__wrapper) {
   background-color: rgba(26, 31, 58, 0.95) !important;
-  box-shadow: inset 0 0 0 1px #0ea5e9 !important;
+  border: 1px solid rgba(0, 212, 255, 0.35) !important;
+  box-shadow: none !important;
+  outline: none !important;
   border-radius: 8px;
   padding: 1px 11px;
   height: 40px;
@@ -459,17 +512,22 @@ export default {
 
 .task-form-dialog :deep(.el-input__wrapper:hover),
 .task-form-dialog :deep(.el-select__wrapper:hover) {
-  box-shadow: inset 0 0 0 1px #7dd3fc !important;
+  border-color: rgba(125, 211, 252, 0.85) !important;
+  box-shadow: none !important;
 }
 
 .task-form-dialog :deep(.el-input__wrapper.is-focus),
 .task-form-dialog :deep(.el-select__wrapper.is-focused) {
-  box-shadow: inset 0 0 0 1px #7dd3fc, 0 0 0 2px rgba(125, 211, 252, 0.3) !important;
+  border-color: rgba(125, 211, 252, 0.95) !important;
+  box-shadow: none !important;
 }
 
 .task-form-dialog :deep(.el-input__inner) {
   color: #e0f2fe;
   background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .task-form-dialog :deep(.el-textarea__inner) {

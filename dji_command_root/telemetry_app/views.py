@@ -75,7 +75,7 @@ from .models import (
 )
 
 from .serializers import (
-    AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
+    AlarmSerializer, AlarmCategorySerializer, WaylineSerializer, WaylineSelectSerializer,
     WaylineImageSerializer, UserSerializer, UserCreateSerializer,
     LoginSerializer, TokenSerializer, ComponentConfigSerializer,
     MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer,
@@ -1588,6 +1588,10 @@ def process_video_task(task, s3_client, bucket, video_key):
     finally:
         if os.path.exists(tmp_path): os.remove(tmp_path)
 
+def is_algorithm_output_image_key(key):
+    filename = key.rsplit("/", 1)[-1]
+    return filename.startswith("detected_") or ("result" in filename)
+
 def minio_poller_worker2():
     """
     [最终适配版] 智能指纹扫描线程
@@ -1639,8 +1643,8 @@ def minio_poller_worker2():
                 if "Contents" not in page: continue
                 for obj in page["Contents"]:
                     key = obj["Key"]
-                    # 🔥 支持视频文件 (.mp4) 和图片
-                    is_video = key.lower().endswith(".mp4")
+                    enable_video_scan = bool(getattr(settings, "ENABLE_VIDEO_SCAN", False))
+                    is_video = enable_video_scan and key.lower().endswith(".mp4")
                     is_image = key.lower().endswith((".jpg", ".jpeg"))
                     
                     if not (is_image or is_video): continue
@@ -1650,11 +1654,14 @@ def minio_poller_worker2():
                         idx = parts.index("media")
                         if len(parts) > idx + 2:
                             folder_prefix = "/".join(parts[:idx + 2]) + "/"
+                            is_algo_output = bool(is_image) and is_algorithm_output_image_key(key)
                             
                             # 初始化字典结构
                             if folder_prefix not in found_sub_folders:
                                 found_sub_folders[folder_prefix] = {
-                                    'sample_key': key,
+                                    'sample_key': None,
+                                    'fallback_sample_key': None,
+                                    'sample_candidates': [],
                                     'video_keys': []
                                 }
                             
@@ -1667,15 +1674,25 @@ def minio_poller_worker2():
                             
                             # 2. 优化 sample_key：优先保留图片作为采样（用于指纹识别），
                             #    如果当前是视频，遇到图片则替换。
-                            current_sample = entry['sample_key']
-                            if current_sample.lower().endswith(".mp4") and is_image:
-                                entry['sample_key'] = key
+                            current_sample = entry.get('sample_key')
+                            if is_image:
+                                if is_algo_output:
+                                    if not entry.get('fallback_sample_key'):
+                                        entry['fallback_sample_key'] = key
+                                else:
+                                    if len(entry.get('sample_candidates') or []) < 5:
+                                        entry['sample_candidates'].append(key)
+                                    if not current_sample:
+                                        entry['sample_key'] = key
+                            elif is_video:
+                                if not current_sample:
+                                    entry['sample_key'] = key
 
             # =========================================================
             # 第二步：处理每一个发现的子文件夹 (创建或更新)
             # =========================================================
             for folder_prefix, entry in found_sub_folders.items():
-                sample_key = entry['sample_key']
+                sample_key = entry.get('sample_key') or entry.get('fallback_sample_key')
                 video_keys = entry['video_keys']
                 
                 folder_uuid = folder_prefix.strip('/').split('/')[-1]
@@ -1705,16 +1722,21 @@ def minio_poller_worker2():
                     local_sn = local_task_info.sn if local_task_info else None
                     local_name = local_task_info.name if local_task_info else None
                     
-                    is_video_task = sample_key.lower().endswith(".mp4")
+                    is_video_task = bool(sample_key) and sample_key.lower().endswith(".mp4")
                     uuid = None
                     fingerprint = None
 
                     if is_video_task:
                         print(f"🎥 [Video] 识别为视频任务: {sample_key} -> 自动归类为保护区")
                     else:
-                        uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
+                        candidate_keys = entry.get('sample_candidates') or ([sample_key] if sample_key else [])
+                        for candidate_key in candidate_keys:
+                            uuid = get_image_action_uuid_from_minio(s3, bucket_name, candidate_key)
+                            if uuid:
+                                sample_key = candidate_key
+                                break
                         if not uuid:
-                            print(f"⚠️ [Skip] 无法从 {sample_key} 提取 UUID")
+                            print(f"⚠️ [Skip] 无法从 {sample_key or folder_prefix} 提取 UUID")
                             continue
 
                     # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
@@ -2304,6 +2326,190 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
             "deleted_alarms": alarm_count
         }, status=200)
 
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsSystemAdmin])
+    def cleanup_preview(self, request, pk=None):
+        parent = self.get_object()
+        if parent.parent_task_id is not None:
+            return Response({"detail": "仅支持父任务清理预览"}, status=400)
+
+        sub_tasks = InspectTask.objects.filter(parent_task=parent).order_by("created_at", "id")
+
+        def normalize_prefix_list(val):
+            if not val:
+                return []
+            if isinstance(val, str):
+                return [val]
+            return list(val)
+
+        sub_task_items = []
+        prefixes = []
+        total_images = 0
+
+        for t in sub_tasks:
+            pl = normalize_prefix_list(getattr(t, "prefix_list", None))
+            bucket = getattr(t, "bucket", None) or getattr(settings, "MINIO_BUCKET_NAME", "dji")
+            img_cnt = InspectImage.objects.filter(inspect_task=t).count()
+            total_images += img_cnt
+            sub_task_items.append({
+                "id": t.id,
+                "external_task_id": t.external_task_id,
+                "dji_task_name": t.dji_task_name,
+                "display_name": InspectTaskSerializer(t).data.get("display_name"),
+                "detect_status": t.detect_status,
+                "bucket": bucket,
+                "prefix_list": pl,
+                "inspectimage_count": img_cnt,
+                "is_cleaned": t.is_cleaned,
+            })
+            for p in pl:
+                if p:
+                    prefixes.append({"task_id": t.id, "bucket": bucket, "prefix": p})
+
+        return Response({
+            "parent": {
+                "id": parent.id,
+                "external_task_id": parent.external_task_id,
+                "display_name": InspectTaskSerializer(parent).data.get("display_name"),
+                "is_cleaned": parent.is_cleaned,
+            },
+            "sub_task_count": len(sub_task_items),
+            "sub_tasks": sub_task_items,
+            "total_inspectimage_count": total_images,
+            "minio_prefixes": prefixes,
+        })
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsSystemAdmin])
+    def cleanup_confirm(self, request, pk=None):
+        parent = self.get_object()
+        if parent.parent_task_id is not None:
+            return Response({"detail": "仅支持父任务清理"}, status=400)
+        if parent.is_cleaned:
+            return Response({"detail": "任务已清理"}, status=200)
+
+        confirm_text = (request.data or {}).get("confirm_text")
+        if confirm_text != "已转存":
+            return Response({"detail": "需要确认已转存后才能清理"}, status=400)
+
+        sub_tasks = list(InspectTask.objects.filter(parent_task=parent).order_by("created_at", "id"))
+
+        def normalize_prefix_list(val):
+            if not val:
+                return []
+            if isinstance(val, str):
+                return [val]
+            return list(val)
+
+        def delete_prefix(s3, bucket, prefix):
+            deleted = 0
+            token = None
+            while True:
+                params = {"Bucket": bucket, "Prefix": prefix, "MaxKeys": 1000}
+                if token:
+                    params["ContinuationToken"] = token
+                resp = s3.list_objects_v2(**params)
+                contents = resp.get("Contents") or []
+                if contents:
+                    objects = [{"Key": o["Key"]} for o in contents if o.get("Key")]
+                    if objects:
+                        s3.delete_objects(Bucket=bucket, Delete={"Objects": objects, "Quiet": True})
+                        deleted += len(objects)
+                if resp.get("IsTruncated"):
+                    token = resp.get("NextContinuationToken")
+                    if not token:
+                        break
+                else:
+                    break
+            return deleted
+
+        prefixes = []
+        for t in sub_tasks:
+            bucket = getattr(t, "bucket", None) or getattr(settings, "MINIO_BUCKET_NAME", "dji")
+            for p in normalize_prefix_list(getattr(t, "prefix_list", None)):
+                if p:
+                    prefixes.append({"task_id": t.id, "bucket": bucket, "prefix": p})
+
+        s3 = get_minio_client()
+        deleted_objects = 0
+        for item in prefixes:
+            deleted_objects += delete_prefix(s3, item["bucket"], item["prefix"])
+
+        with transaction.atomic():
+            deleted_images, _ = InspectImage.objects.filter(inspect_task__in=sub_tasks).delete()
+            InspectTask.objects.filter(id__in=[t.id for t in sub_tasks] + [parent.id]).update(is_cleaned=True)
+
+        return Response({
+            "detail": "清理完成",
+            "cleaned_sub_task_count": len(sub_tasks),
+            "deleted_inspectimage_records": deleted_images,
+            "deleted_minio_objects": deleted_objects,
+            "minio_prefixes": prefixes,
+        }, status=200)
+
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsSystemAdmin], url_path="cleanup_download_zip")
+    def cleanup_download_zip(self, request, pk=None):
+        parent = self.get_object()
+        if parent.parent_task_id is not None:
+            return Response({"detail": "仅支持父任务下载"}, status=400)
+
+        sub_tasks = list(InspectTask.objects.filter(parent_task=parent).order_by("created_at", "id"))
+
+        def normalize_prefix_list(val):
+            if not val:
+                return []
+            if isinstance(val, str):
+                return [val]
+            return list(val)
+
+        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
+
+        def is_image_key(key):
+            if not key or key.endswith("/"):
+                return False
+            filename = key.rsplit("/", 1)[-1]
+            dot = filename.rfind(".")
+            if dot < 0:
+                return False
+            return filename[dot:].lower() in image_exts
+
+        prefixes = []
+        for t in sub_tasks:
+            bucket = getattr(t, "bucket", None) or getattr(settings, "MINIO_BUCKET_NAME", "dji")
+            for p in normalize_prefix_list(getattr(t, "prefix_list", None)):
+                if p:
+                    prefixes.append({"task_id": t.id, "bucket": bucket, "prefix": p})
+
+        if not prefixes:
+            return Response({"detail": "暂无可下载的 MinIO 目录"}, status=400)
+
+        s3 = get_minio_client()
+        temp_file = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+
+        with zipfile.ZipFile(temp_file, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for item in prefixes:
+                bucket = item["bucket"]
+                prefix = item["prefix"]
+                task_id = item["task_id"]
+                safe_prefix = prefix.strip("/").replace("/", "_") or "root"
+                base_dir = f"{task_id}/{safe_prefix}"
+                paginator = s3.get_paginator("list_objects_v2")
+                for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                    for obj in page.get("Contents") or []:
+                        key = obj.get("Key")
+                        if not is_image_key(key):
+                            continue
+                        rel = key[len(prefix):] if key.startswith(prefix) else key.rsplit("/", 1)[-1]
+                        rel = rel.lstrip("/")
+                        arcname = f"{base_dir}/{rel}" if rel else f"{base_dir}/{key.rsplit('/', 1)[-1]}"
+                        body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+                        zf.writestr(arcname, body)
+
+        temp_file.seek(0)
+        label = (parent.external_task_id or str(parent.id)).replace("/", "_").replace("\\", "_").replace(" ", "_")
+        filename = f"{label}-minio-images.zip"
+        response = FileResponse(temp_file, as_attachment=True, filename=filename)
+        response["Content-Type"] = "application/zip"
+        return response
+
 
 class AlarmViewSet(viewsets.ModelViewSet):
     """保留你原本的 Search Fields"""
@@ -2349,6 +2555,12 @@ class WaylineViewSet(viewsets.ModelViewSet):
         }
         variants = variants_map.get(norm, {norm})
         return qs.filter(detect_type__in=list(variants))
+
+    @action(detail=False, methods=['get'], url_path='select-all')
+    def select_all(self, request):
+        qs = self.get_queryset().order_by("name", "id")
+        data = WaylineSelectSerializer(qs, many=True, context=self.get_serializer_context()).data
+        return Response(data, status=200)
 
     @action(detail=False, methods=['get'], url_path='tree')
     def tree(self, request):

@@ -127,25 +127,35 @@
                   v-if="isSubTaskMode && task.detect_status === 'done'"
                   @click="playbackSubTask(task)"
                   class="action-btn playback-btn"
+                  :disabled="task.is_cleaned"
                 >
                   回放
                 </button>
-                <button @click="viewTaskDetail(task)" class="action-btn view-btn">
-                  查看
+                <button @click="viewTaskDetail(task)" class="action-btn view-btn" :disabled="task.is_cleaned">
+                  {{ isSubTaskMode ? '查看' : '统计' }}
                 </button>
-                <button v-if="!isSubTaskMode" @click="viewSubTasks(task)" class="action-btn subtask-btn">
-                  查看子任务
+                <button v-if="!isSubTaskMode" @click="viewSubTasks(task)" class="action-btn subtask-btn" :disabled="task.is_cleaned">
+                  任务列表
                 </button>
                 <button
-                  v-if="task.detect_status === 'scanning' || task.detect_status === 'processing'"
+                  v-if="isSubTaskMode && (task.detect_status === 'scanning' || task.detect_status === 'processing')"
                   @click="forceDeleteTask(task)"
                   class="action-btn force-delete-btn"
                   title="强制结束并删除任务及其所有相关数据"
+                  :disabled="task.is_cleaned"
                 >
                   强制删除
                 </button>
-                <button @click="deleteTask(task.id)" class="action-btn delete-btn">
+                <button v-if="isSubTaskMode" @click="deleteTask(task.id)" class="action-btn delete-btn" :disabled="task.is_cleaned">
                   删除
+                </button>
+                <button
+                  v-if="!isSubTaskMode && !task.is_cleaned && isAdminUser"
+                  @click="openCleanupDialog(task)"
+                  class="action-btn cleanup-btn"
+                  :disabled="cleanupLoading || cleanupDownloadLoading"
+                >
+                  清理
                 </button>
               </div>
             </td>
@@ -184,7 +194,7 @@
       <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
         <div class="modal-premium detail-modal" :class="isCurrentParentTask ? 'detail-modal--parent' : 'detail-modal--child'">
           <div class="modal-header">
-            <h3 class="modal-title">{{ isCurrentParentTask ? '父任务详情' : '子任务详情' }}</h3>
+            <h3 class="modal-title">{{ isCurrentParentTask ? '统计详情' : '子任务详情' }}</h3>
             <button @click="showDetailDialog = false" class="modal-close">×</button>
           </div>
           <div class="modal-body">
@@ -197,13 +207,13 @@
                 <span class="detail-label">巡检任务名</span>
                 <span class="detail-value">{{ currentTask?.dji_task_name || currentTask?.external_task_id || '--' }}</span>
               </div>
-              <div class="detail-item">
+              <div v-if="!isCurrentParentTask" class="detail-item">
                 <span class="detail-label">检测类型</span>
                 <span class="detail-value">
                   {{ currentTask?.detect_category_name || getCategoryName(currentTask?.detect_category) || '--' }}
                 </span>
               </div>
-              <div class="detail-item">
+              <div v-if="!isCurrentParentTask" class="detail-item">
                 <span class="detail-label">航线</span>
                 <span class="detail-value">
                   {{ currentTask?.wayline_details?.name || getWaylineLabel(currentTask?.wayline) || '--' }}
@@ -279,7 +289,7 @@
       <div v-if="showSubTaskDialog" class="modal-overlay" @click.self="showSubTaskDialog = false">
         <div class="modal-premium wide-modal">
           <div class="modal-header">
-            <h3 class="modal-title">子任务列表 - 父任务 {{ currentTask?.external_task_id || currentTask?.id }}</h3>
+            <h3 class="modal-title">任务列表 - {{ currentTask?.external_task_id || currentTask?.id }}巡检任务</h3>
             <button @click="showSubTaskDialog = false" class="modal-close">×</button>
           </div>
           <div class="modal-body subtask-body">
@@ -346,6 +356,55 @@
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showCleanupDialog" class="modal-overlay" @click.self="closeCleanupDialog">
+        <div class="modal-premium cleanup-modal">
+          <div class="modal-header">
+            <h3 class="modal-title">清理确认 - {{ cleanupPreview?.parent?.display_name || cleanupPreview?.parent?.external_task_id || cleanupParentTask?.external_task_id || cleanupParentTask?.id }}</h3>
+            <button @click="closeCleanupDialog" class="modal-close">×</button>
+          </div>
+          <div class="modal-body cleanup-body">
+            <div v-if="cleanupLoading" class="loading-state">
+              <div class="loading-spinner"></div>
+              <p>加载中...</p>
+            </div>
+            <div v-else>
+              <div class="cleanup-tip">
+                请确认已转存 {{ cleanupPreview?.sub_task_count || 0 }} 个任务的 MinIO 媒体文件
+              </div>
+              <div class="cleanup-prefixes">
+                <div v-if="!(cleanupPreview?.minio_prefixes || []).length" class="empty-row">暂无可清理的 MinIO 目录</div>
+                <div v-else class="prefix-list">
+                  <div v-for="(p, idx) in cleanupPreview.minio_prefixes" :key="`${p.bucket}-${p.prefix}-${idx}`" class="prefix-item">
+                    <span class="prefix-bucket">{{ p.bucket }}</span>
+                    <span class="prefix-path">{{ p.prefix }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="cleanup-confirm-row">
+                <span class="cleanup-confirm-label">请输入已转存</span>
+                <input v-model="cleanupConfirmText" class="cleanup-confirm-input" placeholder="已转存" />
+              </div>
+            </div>
+            <div v-if="cleanupDownloadLoading" class="cleanup-download-overlay">
+              <div class="cleanup-download-overlay-card">
+                <div class="loading-spinner"></div>
+                <p class="cleanup-download-title">正在生成并下载备份...</p>
+                <p class="cleanup-download-sub">请不要关闭弹窗或刷新页面</p>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button @click="downloadCleanupZip" class="modal-btn download-btn" :disabled="cleanupLoading || cleanupDownloadLoading || !(cleanupPreview?.minio_prefixes || []).length">
+              {{ cleanupDownloadLoading ? '下载中...' : '下载备份' }}
+            </button>
+            <button @click="closeCleanupDialog" class="modal-btn secondary-btn" :disabled="cleanupLoading || cleanupDownloadLoading">取消</button>
+            <button @click="confirmCleanup" class="modal-btn primary-btn" :disabled="cleanupLoading || cleanupDownloadLoading || cleanupConfirmText !== '已转存'">确认清理</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -378,6 +437,12 @@ export default {
       currentTask: null,
       showSubTaskDialog: false,
       subTasks: [],
+      showCleanupDialog: false,
+      cleanupPreview: null,
+      cleanupParentTask: null,
+      cleanupConfirmText: '',
+      cleanupLoading: false,
+      cleanupDownloadLoading: false,
       activeDropdown: '',
       parentDonutSeries: [],
       parentDonutTotalImages: 0,
@@ -406,6 +471,9 @@ export default {
   computed: {
     isSubTaskMode() {
       return Boolean(this.categoryFilter || this.waylineFilter)
+    },
+    isAdminUser() {
+      return Boolean(this.$store?.getters?.isAdmin)
     },
     isCurrentParentTask() {
       return this.isParentTask(this.currentTask)
@@ -454,6 +522,77 @@ export default {
       this.activeDropdown = ''
       this.currentPage = 1
       this.loadTasks()
+    },
+    async openCleanupDialog(task) {
+      this.cleanupParentTask = task
+      this.cleanupPreview = null
+      this.cleanupConfirmText = ''
+      this.cleanupLoading = true
+      this.cleanupDownloadLoading = false
+      this.showCleanupDialog = true
+      try {
+        const res = await inspectTaskApi.getCleanupPreview(task.id)
+        this.cleanupPreview = res
+      } catch (e) {
+        const msg = e?.response?.data?.detail || '获取清理预览失败'
+        ElMessage.error(msg)
+        this.showCleanupDialog = false
+      } finally {
+        this.cleanupLoading = false
+      }
+    },
+    closeCleanupDialog() {
+      if (this.cleanupLoading || this.cleanupDownloadLoading) return
+      this.showCleanupDialog = false
+      this.cleanupPreview = null
+      this.cleanupParentTask = null
+      this.cleanupConfirmText = ''
+      this.cleanupLoading = false
+      this.cleanupDownloadLoading = false
+    },
+    async confirmCleanup() {
+      if (!this.cleanupParentTask) return
+      if (this.cleanupConfirmText !== '已转存') return
+      if (this.cleanupLoading || this.cleanupDownloadLoading) return
+      this.cleanupLoading = true
+      try {
+        await inspectTaskApi.confirmCleanup(this.cleanupParentTask.id, { confirm_text: this.cleanupConfirmText })
+        ElMessage.success('清理完成')
+        this.showCleanupDialog = false
+        this.cleanupPreview = null
+        this.cleanupParentTask = null
+        this.cleanupConfirmText = ''
+        await this.loadTasks()
+      } catch (e) {
+        const msg = e?.response?.data?.detail || '清理失败'
+        ElMessage.error(msg)
+      } finally {
+        this.cleanupLoading = false
+      }
+    },
+    async downloadCleanupZip() {
+      if (!this.cleanupParentTask) return
+      if (this.cleanupLoading || this.cleanupDownloadLoading) return
+      if (!((this.cleanupPreview?.minio_prefixes || []).length)) return
+      this.cleanupDownloadLoading = true
+      try {
+        const blob = await inspectTaskApi.downloadCleanupZip(this.cleanupParentTask.id)
+        const raw = (this.cleanupPreview?.parent?.external_task_id || this.cleanupParentTask?.external_task_id || this.cleanupParentTask?.id || 'task').toString()
+        const label = raw.replaceAll('/', '_').replaceAll('\\', '_').replace(/\s+/g, '_')
+        const filename = `${label}-minio-images.zip`
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        window.URL.revokeObjectURL(url)
+      } catch (e) {
+        ElMessage.error('下载失败')
+      } finally {
+        this.cleanupDownloadLoading = false
+      }
     },
     isParentTask(task) {
       if (!task) return false
@@ -1331,6 +1470,16 @@ export default {
   transform: translateY(-1px);
 }
 
+.cleanup-btn {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+  color: #fff;
+}
+
+.cleanup-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
+  transform: translateY(-1px);
+}
+
 .text-muted {
   color: #64748b;
   font-size: 12px;
@@ -1498,6 +1647,59 @@ export default {
 
 .wide-modal {
   max-width: 1200px;
+}
+
+.cleanup-modal {
+  width: min(92vw, 900px);
+  max-width: 900px;
+}
+
+.cleanup-body {
+  padding: 18px 20px;
+  max-height: 65vh;
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
+  position: relative;
+}
+
+.cleanup-download-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.cleanup-download-overlay-card {
+  width: min(520px, 92%);
+  padding: 18px 16px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  text-align: center;
+  color: #cbd5e1;
+}
+
+.cleanup-download-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.cleanup-download-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.cleanup-tip {
+  color: #cbd5e1;
+  font-size: 14px;
+  margin-bottom: 12px;
 }
 
 @keyframes slideUp {
@@ -1701,18 +1903,67 @@ export default {
 
 .prefix-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
 
 .prefix-item {
-  padding: 6px 12px;
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  border-radius: 10px;
+  background: rgba(10, 14, 39, 0.35);
+}
+
+.prefix-bucket {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
   border-radius: 6px;
-  color: #60a5fa;
   font-size: 12px;
+  font-weight: 700;
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  flex: 0 0 auto;
+}
+
+.prefix-path {
   font-family: 'Courier New', monospace;
+  color: #e2e8f0;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.cleanup-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.cleanup-confirm-label {
+  color: #94a3b8;
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+
+.cleanup-confirm-input {
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(10, 14, 39, 0.6);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #e2e8f0;
+  font-size: 14px;
+  outline: none;
+}
+
+.cleanup-confirm-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .modal-footer {
@@ -1741,6 +1992,28 @@ export default {
 
 .secondary-btn:hover {
   background: rgba(100, 116, 139, 0.3);
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.primary-btn:hover:not(:disabled) {
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.35);
+  transform: translateY(-1px);
+}
+
+.download-btn {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+  color: #fff;
+  border: 1px solid rgba(6, 182, 212, 0.35);
+}
+
+.download-btn:hover:not(:disabled) {
+  box-shadow: 0 8px 24px rgba(6, 182, 212, 0.3);
+  transform: translateY(-1px);
 }
 
 /* 滚动条样式 */

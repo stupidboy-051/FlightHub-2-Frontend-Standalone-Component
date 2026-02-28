@@ -179,6 +179,39 @@ export default {
     }
   },
 
+  async getCleanupPreview(parentId) {
+    try {
+      const response = await api.get(`/inspect-tasks/${parentId}/cleanup_preview/`)
+      return response
+    } catch (error) {
+      console.error('获取清理预览失败:', error)
+      throw error
+    }
+  },
+
+  async confirmCleanup(parentId, payload = {}) {
+    try {
+      const response = await api.post(`/inspect-tasks/${parentId}/cleanup_confirm/`, payload)
+      return response
+    } catch (error) {
+      console.error('确认清理失败:', error)
+      throw error
+    }
+  },
+
+  async downloadCleanupZip(parentId) {
+    try {
+      const response = await api.get(`/inspect-tasks/${parentId}/cleanup_download_zip/`, {
+        responseType: 'blob',
+        timeout: 10 * 60 * 1000
+      })
+      return response
+    } catch (error) {
+      console.error('下载备份失败:', error)
+      throw error
+    }
+  },
+
   // 获取某个巡检任务下的图片列表
   async getTaskImages(taskId) {
     try {
