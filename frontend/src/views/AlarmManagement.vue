@@ -129,4 +129,16 @@ export default {
   display: flex;
   flex-direction: column;
 }
+/* 仅覆盖本页面内告警列表字号，整体上调一档 */
+.alarm-content :deep(.alarm-table th),
+.alarm-content :deep(.alarm-table td) {
+  font-size: 14px;
+}
+
+.alarm-content :deep(.datetime-text),
+.alarm-content :deep(.category-badge),
+.alarm-content :deep(.status-badge),
+.alarm-content :deep(.action-btn) {
+  font-size: 13px;
+}
 </style>
