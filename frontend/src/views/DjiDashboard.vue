@@ -425,7 +425,7 @@ export default {
   data() {
     return {
       detectTypes: [
-        { name: '铁路', code: 'rail', icon: '🛤️', keywords: 'rail, 铁路, 轨道' },
+        { name: '轨道', code: 'rail', icon: '🛤️', keywords: 'rail, 铁路, 轨道' },
         { name: '接触网', code: 'contactline', icon: '⚡', keywords: 'contactline, 接触网, catenary, overhead' },
         { name: '桥梁', code: 'bridge', icon: '🌉', keywords: 'bridge, 桥梁' },
         { name: '保护区', code: 'protected_area', icon: '🛡️', keywords: 'protected_area, 保护区' }
@@ -1854,7 +1854,7 @@ export default {
           position: this.dronePositionProperty,
           orientation: this.droneOrientationProperty,
           model: {
-            uri: '/models/fly2.glb',
+            uri: './models/fly2.glb',
             minimumPixelSize: 128,
             maximumScale: 2000,
             scale: 0.5,
