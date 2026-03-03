@@ -112,7 +112,7 @@
               <span class="datetime-text">{{ formatDate(task.created_at) }}</span>
             </td>
             <td>
-              <span class="status-badge" :class="`status-${task.detect_status}`">
+              <span class="status-badge" :class="`status-${getStatusClass(task.detect_status)}`">
                 {{ getStatusText(task.detect_status) }}
               </span>
             </td>
@@ -768,7 +768,11 @@ export default {
         }
 
         if (this.statusFilter) {
-          params.detect_status = this.statusFilter
+          if (this.statusFilter === 'processing') {
+            params.detect_status__in = 'processing,scanning'
+          } else {
+            params.detect_status = this.statusFilter
+          }
         }
 
         if (this.waylineFilter) {
@@ -958,10 +962,16 @@ export default {
       return categoryMap[categoryValue] || ''
     },
     
+    getStatusClass(status) {
+      if (status === 'scanning') return 'processing'
+      return status
+    },
+    
     getStatusText(status) {
       const statusMap = {
         'pending': '待检测',
         'processing': '检测中',
+        'scanning': '检测中',
         'done': '已完成',
         'failed': '失败'
       }

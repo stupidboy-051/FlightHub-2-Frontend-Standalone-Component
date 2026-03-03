@@ -62,8 +62,9 @@
         @loadstart="onLoadStart"
         @canplay="onCanPlay"
         @playing="onPlaying"
-        @error="onError"
         @waiting="onWaiting"
+        @error="onError"
+        @timeupdate="onTimeUpdate"
       ></video>
 
       <div v-if="loading" class="overlay loading-overlay">
@@ -153,12 +154,27 @@ export default {
       monitorCheckTimer: null,
       // 🔥 新增：流状态检查
       isStreamOnline: null,  // null=未检查, true=在线, false=离线
-      checkingStream: false
+      checkingStream: false,
+      // 🔥 新增：卡死检测
+      lastTimeUpdate: 0,
+      stuckWatchdogTimer: null,
+      stuckCount: 0,
+      _reloadTimer: null,
+      _isUnmounted: false,
+      _lastChaseAt: 0
     }
   },
   computed: {
     // 🔥 使用代理路径访问 ZLM，避免跨域问题
     streamUrl() {
+      const normalizeToMp4 = (url) => {
+        if (!url) return url
+        if (url.endsWith('.live.flv')) {
+          return url.replace('.live.flv', '.live.mp4')
+        }
+        return url
+      }
+
       // 如果传入了 Override URL，进行智能处理
       if (this.streamUrlOverride) {
         const url = this.streamUrlOverride
@@ -178,9 +194,9 @@ export default {
               // 重新构建为 HTTP-MP4
               const isDev = process.env.NODE_ENV === 'development'
               if (isDev) {
-                return `/zlm/${app}/${stream}.live.mp4`
+                return normalizeToMp4(`/zlm/${app}/${stream}.live.mp4`)
               } else {
-                return `${this.zlmServer}/${app}/${stream}.live.mp4`
+                return normalizeToMp4(`${this.zlmServer}/${app}/${stream}.live.mp4`)
               }
             }
           } catch (e) {
@@ -189,7 +205,7 @@ export default {
         }
         
         // 如果不是 RTMP 或解析失败，原样返回
-        return url
+        return normalizeToMp4(url)
       }
 
       if (!this.streamId) return ''
@@ -199,9 +215,9 @@ export default {
       // 生产环境: 直接使用 zlmServer 地址
       const isDev = process.env.NODE_ENV === 'development'
       if (isDev) {
-        return `/zlm/live/${this.streamId}.live.mp4`
+        return normalizeToMp4(`/zlm/live/${this.streamId}.live.mp4`)
       } else {
-        return `${this.zlmServer}/live/${this.streamId}.live.mp4`
+        return normalizeToMp4(`${this.zlmServer}/live/${this.streamId}.live.mp4`)
       }
     }
   },
@@ -216,14 +232,42 @@ export default {
     this.monitorCheckTimer = setInterval(() => {
       this.checkMonitorStatus()
     }, 5000)
+
+    // 🔥 启动卡死检测看门狗 (每2秒检查一次)
+    this.startStuckWatchdog()
   },
   beforeUnmount() {
+    this._isUnmounted = true
+    if (this._reloadTimer) {
+      clearTimeout(this._reloadTimer)
+      this._reloadTimer = null
+    }
     this.destroyPlayer()
+    this.stopStuckWatchdog()
     if (this.monitorCheckTimer) {
       clearInterval(this.monitorCheckTimer)
     }
   },
   methods: {
+    chaseToLive() {
+      const video = this.$refs.videoElement
+      if (!video) return
+      if (!video.buffered || video.buffered.length === 0) return
+
+      const now = Date.now()
+      if (now - (this._lastChaseAt || 0) < 1000) return
+
+      const end = video.buffered.end(video.buffered.length - 1)
+      const lag = end - video.currentTime
+      if (!Number.isFinite(lag) || lag <= 1.5) return
+
+      const target = Math.max(0, end - 0.3)
+      if (Number.isFinite(target) && target > 0) {
+        try { video.currentTime = target } catch (e) { void e }
+        this._lastChaseAt = now
+      }
+    },
+
     // ========== 监听状态持久化方法 ==========
     getStorageKey() {
       return `monitor_status_${this.streamId}`
@@ -278,40 +322,41 @@ export default {
       console.log('FMP4 模式：无需加载 flv.js')
     },
 
-    // 🔥【关键修改】原生 FMP4 初始化逻辑
+    // 🔥【关键修改】原生 MP4 初始化逻辑
     initPlayer() {
       const video = this.$refs.videoElement
 
+      if (this._isUnmounted) return
+      if (!video) return
       if (!this.streamUrl) {
         console.warn('流地址为空')
+        this.loading = false
         return
       }
 
-      console.log('正在初始化 FMP4 播放:', this.streamUrl)
+      this.destroyPlayer()
+
+      console.log('正在初始化 HTTP-MP4 播放:', this.streamUrl)
 
       this.loading = true
       this.hasError = false
+      this.errorMessage = ''
 
-      // 1. 直接设置原生 src
       video.src = this.streamUrl
-      // 2. 解决跨域问题（重要）
-      video.crossOrigin = 'anonymous'
-
-      // 3. 加载
       video.load()
 
-      // 4. 尝试自动播放
-      if (this.autoPlay) {
-        // 某些浏览器需要静音才能自动播放
-        // video.muted = true
-        video.play().then(() => {
-          console.log('✅ FMP4 自动播放成功')
-          this.isPlaying = true
-          this.loading = false
-        }).catch(err => {
+      if (!this.autoPlay) {
+        this.loading = false
+        this.isPlaying = false
+        return
+      }
+
+      const playRet = video.play()
+      if (playRet && typeof playRet.then === 'function') {
+        playRet.catch(err => {
           console.warn('自动播放被阻止，可能需要用户交互:', err)
+          this.isPlaying = false
           this.loading = false
-          // 如果是因为没静音导致的，可以在这里提示用户点击
         })
       }
     },
@@ -319,39 +364,38 @@ export default {
     // 销毁播放器
     destroyPlayer() {
       const video = this.$refs.videoElement
+
       if (video) {
-        video.pause()
-        video.src = '' // 清空地址停止下载
+        try { video.pause() } catch (e) { console.warn(e) }
+        video.removeAttribute('src')
         video.load()
       }
+
       this.isPlaying = false
     },
 
     // 切换播放/暂停
     togglePlay() {
       const video = this.$refs.videoElement
-      const flvPlayer = this._flvPlayer
 
       if (!video) return
 
       if (this.isPlaying) {
-        if (flvPlayer) {
-          flvPlayer.pause()
-        } else {
-          video.pause()
-        }
+        video.pause()
         this.isPlaying = false
       } else {
-        if (flvPlayer) {
-          flvPlayer.play().catch(err => {
-            console.error('FLV 播放失败:', err)
+        this.loading = true
+        const ret = video.play()
+        if (ret && typeof ret.then === 'function') {
+          ret.then(() => {
+            this.loading = false
+          }).catch(err => {
+            console.error('播放失败:', err)
+            this.loading = false
           })
         } else {
-          video.play().catch(err => {
-            console.error('播放失败:', err)
-          })
+          this.loading = false
         }
-        this.isPlaying = true
       }
     },
 
@@ -365,10 +409,14 @@ export default {
 
     // 重新加载
     reload() {
+      if (this._isUnmounted) return
+      if (this._reloadTimer) return
       this.hasError = false
       this.errorMessage = ''
+      this.loading = true
       this.destroyPlayer()
-      setTimeout(() => {
+      this._reloadTimer = setTimeout(() => {
+        this._reloadTimer = null
         this.initPlayer()
       }, 300)
     },
@@ -440,6 +488,52 @@ export default {
 
     onWaiting() {
       console.log('缓冲中...')
+      this.chaseToLive()
+    },
+
+    // 🔥 新增：FMP4 追帧逻辑，降低延迟
+    onTimeUpdate() {
+      const video = this.$refs.videoElement
+      if (!video) return
+
+      // 更新最后活动时间，用于看门狗检测
+      this.lastTimeUpdate = Date.now()
+      this.chaseToLive()
+    },
+
+    // 🔥 新增：卡死检测看门狗
+    startStuckWatchdog() {
+      this.stopStuckWatchdog()
+      this.lastTimeUpdate = Date.now()
+      
+      this.stuckWatchdogTimer = setInterval(() => {
+        // 如果没有在播放或正在加载，不检测
+        if (!this.isPlaying || this.loading || this.hasError) return
+
+        const now = Date.now()
+        // 如果超过 4秒 没有 timeupdate 事件，认为画面卡死
+        if (now - this.lastTimeUpdate > 4000) {
+          this.stuckCount++
+          console.warn(`⚠️ 画面疑似卡死 (${this.stuckCount}次)，上次更新: ${(now - this.lastTimeUpdate)/1000}s 前`)
+          
+          // 如果连续卡死检测触发，尝试重载
+          if (this.stuckCount >= 1) {
+             console.log('🔄 触发防卡死重连机制...')
+             this.reload()
+             this.stuckCount = 0
+             this.lastTimeUpdate = Date.now() // 重置计时
+          }
+        } else {
+          this.stuckCount = 0
+        }
+      }, 2000)
+    },
+
+    stopStuckWatchdog() {
+      if (this.stuckWatchdogTimer) {
+        clearInterval(this.stuckWatchdogTimer)
+        this.stuckWatchdogTimer = null
+      }
     },
 
     // ======================================================================
