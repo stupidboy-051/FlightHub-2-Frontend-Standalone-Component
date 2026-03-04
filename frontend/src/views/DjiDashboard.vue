@@ -349,6 +349,8 @@
       :dock-name="selectedDockName"
     />
 
+    <ImagePreviewModal v-model="showAlarmImagePreview" :url="previewAlarmImageUrl" title="图片预览" />
+
     <!-- 告警详情弹窗 -->
     <div v-if="showAlarmDetail" class="modal-overlay" @click.self="showAlarmDetail = false">
       <div class="modal-premium">
@@ -384,7 +386,14 @@
             </div>
             <div v-if="currentAlarm.image_signed_url || currentAlarm.image_url" class="detail-item full-width">
               <span class="detail-label">告警图片</span>
-              <div class="alarm-image">
+              <div
+                class="alarm-image"
+                role="button"
+                tabindex="0"
+                @click="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
+                @keydown.enter.prevent="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
+                @keydown.space.prevent="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
+              >
                 <img
                   :src="currentAlarm.image_signed_url || currentAlarm.image_url"
                   alt="告警图片"
@@ -406,6 +415,7 @@
 import AlarmPanel from '../components/AlarmPanel.vue'
 import LiveStreamPlayer from '../components/LiveStreamPlayer.vue'
 import CreateFlightTaskDialog from '../components/CreateFlightTaskDialog.vue'
+import ImagePreviewModal from '../components/ImagePreviewModal.vue'
 import alarmApi from '../api/alarmApi.js'
 import waylineApi from '../api/waylineApi.js'
 import componentConfigApi from '../api/componentConfigApi.js'
@@ -420,7 +430,8 @@ export default {
   components: {
     AlarmPanel,
     LiveStreamPlayer,
-    CreateFlightTaskDialog
+    CreateFlightTaskDialog,
+    ImagePreviewModal
   },
   data() {
     return {
@@ -455,6 +466,8 @@ export default {
       protectedAlarmToastTimer: null,
       showAlarmDetail: false,
       currentAlarm: null,
+      showAlarmImagePreview: false,
+      previewAlarmImageUrl: '',
       fh2CheckTimer: null,
       componentConfig: null,
       zlmServerUrl: 'http://192.168.10.10',
@@ -662,6 +675,11 @@ export default {
     }
   },
   methods: {
+    openAlarmImagePreview(url) {
+      if (!url) return
+      this.previewAlarmImageUrl = url
+      this.showAlarmImagePreview = true
+    },
     checkFh2Availability() {
       if (typeof window !== 'undefined' && window.FH2) {
         this.fh2Loaded = true
@@ -4271,6 +4289,18 @@ export default {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid rgba(0, 212, 255, 0.2);
+  cursor: zoom-in;
+  transition: all 0.2s ease;
+}
+
+.alarm-image:hover {
+  border-color: rgba(0, 212, 255, 0.35);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.08);
+}
+
+.alarm-image:focus-visible {
+  outline: 2px solid rgba(0, 212, 255, 0.6);
+  outline-offset: 2px;
 }
 
 .alarm-image img {

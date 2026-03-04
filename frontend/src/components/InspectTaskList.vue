@@ -411,7 +411,7 @@
 <script>
 import inspectTaskApi from '../api/inspectTaskApi'
 import waylineApi from '../api/waylineApi'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DonutRing from './dashboard/DonutRing.vue'
 
 export default {
@@ -866,15 +866,17 @@ export default {
     },
     
     async deleteTask(taskId) {
-      if (!confirm('确定要删除这个巡检任务吗？')) {
-        return
-      }
-
       try {
+        await ElMessageBox.confirm('确定要删除这个巡检任务吗？', '提示', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
         await inspectTaskApi.deleteInspectTask(taskId)
         ElMessage.success('删除成功')
         await this.loadTasks()
       } catch (error) {
+        if (error === 'cancel' || error === 'close') return
         console.error('删除任务失败:', error)
         ElMessage.error('删除任务失败')
       }
@@ -882,24 +884,24 @@ export default {
 
     async forceDeleteTask(task) {
       const taskInfo = task.external_task_id || task.id
-      const confirmMsg = `⚠️ 警告：强制删除将彻底删除任务及其所有相关数据！\n\n` +
-        `任务: ${taskInfo}\n` +
-        `包括:\n` +
-        `- 所有图片记录 (InspectImage)\n` +
-        `- 所有告警记录 (Alarm)\n` +
-        `- 任务本身 (InspectTask)\n\n` +
-        `此操作不可恢复！确定要继续吗？`
-
-      if (!confirm(confirmMsg)) {
-        return
-      }
-
-      // 二次确认
-      if (!confirm('最后确认：真的要强制删除这个任务吗？所有相关数据将被永久删除！')) {
-        return
-      }
 
       try {
+        await ElMessageBox.confirm(
+          `强制删除将彻底删除任务及其所有相关数据，不可恢复。\n任务：${taskInfo}\n确定要继续吗？`,
+          '强制删除确认',
+          {
+            confirmButtonText: '继续',
+            cancelButtonText: '取消',
+            type: 'error'
+          }
+        )
+
+        await ElMessageBox.confirm('最后确认：真的要强制删除这个任务吗？所有相关数据将被永久删除！', '最后确认', {
+          confirmButtonText: '强制删除',
+          cancelButtonText: '取消',
+          type: 'error'
+        })
+
         ElMessage.info({
           message: '正在强制删除任务...',
           duration: 2000
@@ -915,6 +917,7 @@ export default {
         // 重新加载任务列表
         await this.loadTasks()
       } catch (error) {
+        if (error === 'cancel' || error === 'close') return
         console.error('强制删除任务失败:', error)
         const errorMsg = error.response?.data?.detail || error.message || '强制删除任务失败'
         ElMessage.error({

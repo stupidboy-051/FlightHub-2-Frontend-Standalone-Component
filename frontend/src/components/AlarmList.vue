@@ -100,7 +100,11 @@
             <td colspan="7" class="empty-row">暂无告警数据</td>
           </tr>
           <tr v-for="alarm in filteredAlarms" :key="alarm.id" class="alarm-row">
-            <td>{{ getWaylineName(alarm) }}</td>
+            <td>
+              <el-tooltip :content="getWaylineName(alarm)" placement="top" effect="dark" :show-after="300">
+                <span class="wayline-name-ellipsis">{{ getWaylineName(alarm) }}</span>
+              </el-tooltip>
+            </td>
             <td class="text-center">
               <span class="datetime-text">{{ formatDate(alarm.created_at) }}</span>
             </td>
@@ -279,7 +283,14 @@
               </div>
               <div v-if="currentAlarm?.image_url" class="detail-item full-width">
                 <span class="detail-label">报警图片</span>
-                <div class="alarm-image">
+                <div
+                  class="alarm-image"
+                  @click="openImagePreview(currentAlarm.image_url)"
+                  @keydown.enter.prevent="openImagePreview(currentAlarm.image_url)"
+                  @keydown.space.prevent="openImagePreview(currentAlarm.image_url)"
+                  role="button"
+                  tabindex="0"
+                >
                   <img :src="currentAlarm.image_url" alt="告警图片" />
                 </div>
               </div>
@@ -291,12 +302,30 @@
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showImagePreview" class="modal-overlay" @click.self="closeImagePreview">
+        <div class="modal-premium image-preview-modal">
+          <div class="modal-header">
+            <h3 class="modal-title">图片预览</h3>
+            <button @click="closeImagePreview" class="modal-close">×</button>
+          </div>
+          <div class="modal-body image-preview-body">
+            <img v-if="previewImageUrl" :src="previewImageUrl" alt="告警大图" class="image-preview-img" />
+          </div>
+          <div class="modal-footer">
+            <button @click="closeImagePreview" class="modal-btn secondary-btn">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script>
 import alarmApi from '../api/alarmApi.js'
 import waylineApi from '../api/waylineApi.js'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 export default {
   name: 'AlarmList',
@@ -316,7 +345,9 @@ export default {
       totalAlarms: 0,
       showStatusDialog: false,
       showDetailDialog: false,
+      showImagePreview: false,
       currentAlarm: null,
+      previewImageUrl: '',
       newAlarmStatus: '',
       activeDropdown: '' // 当前打开的下拉框：'status' | 'type' | 'wayline' | ''
     }
@@ -574,13 +605,29 @@ export default {
       }
     },
     async deleteAlarm(id) {
-      if (!confirm('确定要删除这条告警吗？')) return
       try {
+        await ElMessageBox.confirm('确定要删除这条告警吗？', '提示', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
         await alarmApi.deleteAlarm(id)
+        ElMessage.success('删除成功')
         this.loadAlarms()
       } catch (error) {
+        if (error === 'cancel' || error === 'close') return
         console.error('删除告警失败:', error)
+        ElMessage.error('删除告警失败')
       }
+    }
+    ,
+    openImagePreview(url) {
+      this.previewImageUrl = url
+      this.showImagePreview = true
+    },
+    closeImagePreview() {
+      this.showImagePreview = false
+      this.previewImageUrl = ''
     }
   }
 }
@@ -881,6 +928,15 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wayline-name-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
 }
 
 .id-badge {
@@ -1313,12 +1369,46 @@ export default {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid rgba(239, 68, 68, 0.2);
+  cursor: zoom-in;
+  transition: all 0.2s ease;
+}
+
+.alarm-image:focus-visible {
+  outline: 2px solid rgba(239, 68, 68, 0.6);
+  outline-offset: 2px;
+}
+
+.alarm-image:hover {
+  border-color: rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08);
+}
+
+.image-preview-modal {
+  max-width: 1100px;
+  width: 95vw;
+}
+
+.image-preview-body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 18px 24px;
 }
 
 .alarm-image img {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.image-preview-img {
+  max-width: 100%;
+  max-height: 75vh;
+  object-fit: contain;
+  display: block;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgba(10, 14, 39, 0.6);
 }
 
 /* 加载状态 */
