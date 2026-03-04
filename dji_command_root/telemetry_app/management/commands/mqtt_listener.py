@@ -11,7 +11,11 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import datetime
 import urllib3
-from telemetry_app.flight_stats_tracker import finalize_session_for_device, refresh_session_with_position
+from telemetry_app.flight_stats_tracker import (
+    finalize_session_for_device,
+    mark_flight_started_for_device,
+    refresh_session_with_position,
+)
 
 # 禁用 HTTPS 不安全警告 (针对私有化部署自签名证书)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -428,6 +432,9 @@ class Command(BaseCommand):
             if not created and dock_sn in DOCK_NAME_MAPPING:
                 dock.dock_name = DOCK_NAME_MAPPING[dock_sn]
 
+            previous_in_dock = dock.drone_in_dock
+            previous_drone_sn = dock.drone_sn
+
             # 更新位置信息
             if 'latitude' in payload:
                 dock.latitude = payload['latitude']
@@ -531,8 +538,26 @@ class Command(BaseCommand):
             dock.is_online = True
 
             dock.save()
-            if dock.drone_in_dock in (1, "1") and dock.drone_sn:
-                finalize_session_for_device(dock.drone_sn, ended_at=timezone.now())
+            now = timezone.now()
+            current_in_dock = dock.drone_in_dock
+            current_drone_sn = dock.drone_sn or previous_drone_sn
+
+            if previous_in_dock in (1, "1") and current_in_dock in (0, "0") and current_drone_sn:
+                mark_flight_started_for_device(
+                    current_drone_sn,
+                    started_at=now,
+                    initial_point={
+                        'latitude': payload.get('latitude'),
+                        'longitude': payload.get('longitude'),
+                        'altitude': payload.get('height') if payload.get('height') is not None else payload.get('altitude'),
+                    },
+                )
+
+            if previous_in_dock in (0, "0") and current_in_dock in (1, "1") and current_drone_sn:
+                finalize_session_for_device(current_drone_sn, ended_at=now)
+            elif current_in_dock in (1, "1") and current_drone_sn:
+                # 兜底收敛，避免漏掉状态跳变事件导致会话悬挂。
+                finalize_session_for_device(current_drone_sn, ended_at=now)
 
             action = "创建" if created else "更新"
             print(f"   ✅ 机场状态{action}成功！{dock_sn}")

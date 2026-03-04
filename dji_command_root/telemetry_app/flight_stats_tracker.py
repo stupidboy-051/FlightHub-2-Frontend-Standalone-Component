@@ -37,9 +37,29 @@ def _distance_meters(lat1, lon1, alt1, lat2, lon2, alt2):
     return horizontal
 
 
-def _latest_task_for_sn(device_sn):
+def _latest_task_for_dock(dock_sn):
+    if not dock_sn:
+        return None
+    return FlightTaskInfo.objects.filter(sn=dock_sn).order_by("-created_at").first()
+
+
+def _dock_for_drone(device_sn):
     if not device_sn:
         return None
+    return (
+        DockStatus.objects.filter(drone_sn=device_sn)
+        .order_by("-last_update_time", "-updated_at")
+        .first()
+    )
+
+
+def _latest_task_for_device(device_sn):
+    dock = _dock_for_drone(device_sn)
+    if dock and dock.dock_sn:
+        task = _latest_task_for_dock(dock.dock_sn)
+        if task:
+            return task
+    # Fallback compatibility: old data may store drone SN directly in FlightTaskInfo.sn.
     return FlightTaskInfo.objects.filter(sn=device_sn).order_by("-created_at").first()
 
 
@@ -51,17 +71,13 @@ def _task_for_session(session):
         task = FlightTaskInfo.objects.filter(task_uuid=task_uuid).first()
         if task:
             return task
-    return _latest_task_for_sn(session.device_sn)
+    return _latest_task_for_device(session.device_sn)
 
 
 def _drone_in_dock_state(device_sn):
     if not device_sn:
         return None
-    dock = (
-        DockStatus.objects.filter(drone_sn=device_sn)
-        .order_by("-last_update_time", "-updated_at")
-        .first()
-    )
+    dock = _dock_for_drone(device_sn)
     if not dock:
         return None
     value = dock.drone_in_dock
@@ -95,11 +111,51 @@ def _persist_task_stats(task, session, end_time=None):
     return True
 
 
+def mark_flight_started_for_device(device_sn, started_at=None, initial_point=None):
+    """
+    Start/reset the active flight session for a drone when dock state changes to working.
+    """
+    normalized_sn = str(device_sn or "").strip()
+    if not normalized_sn:
+        return False
+
+    timestamp = started_at or timezone.now()
+    raw_point = initial_point or {}
+    lat = _to_float(raw_point.get("latitude"))
+    lon = _to_float(raw_point.get("longitude"))
+    alt = _to_float(raw_point.get("altitude"), 0.0)
+
+    try:
+        session, _ = FlightStatsSession.objects.get_or_create(device_sn=normalized_sn)
+    except DatabaseError as exc:
+        logger.warning("FlightStatsSession get_or_create failed for %s: %s", normalized_sn, exc)
+        return False
+
+    task = _latest_task_for_device(normalized_sn)
+    session.is_active = True
+    session.task_uuid = task.task_uuid if task else ""
+    session.flight_started_at = timestamp
+    session.last_position_time = timestamp
+    session.distance_km = 0.0
+
+    if math.isfinite(lat) and math.isfinite(lon):
+        session.last_latitude = lat
+        session.last_longitude = lon
+        session.last_altitude = alt if math.isfinite(alt) else 0.0
+    else:
+        session.last_latitude = None
+        session.last_longitude = None
+        session.last_altitude = None
+
+    session.save()
+    if task:
+        _persist_task_stats(task, session, end_time=timestamp)
+    return True
+
+
 def refresh_session_with_position(position):
     """
-    处理单条无人机位置数据：
-    - 飞行中：持续累加里程/时长
-    - 未开始：按首个有效点启动会话
+    Consume one drone position point and update the persisted flight session.
     """
     device_sn = str(getattr(position, "device_sn", "") or "").strip()
     if not device_sn:
@@ -119,11 +175,11 @@ def refresh_session_with_position(position):
         return False
 
     if not session.is_active:
-        # 仅在“明确在舱内”时拒绝启动；未知状态允许启动，避免漏记。
+        # 仅在明确“仍在机舱内”时阻止启动，避免误记。
         in_dock = _drone_in_dock_state(device_sn)
         if in_dock is True:
             return False
-        task = _latest_task_for_sn(device_sn)
+        task = _latest_task_for_device(device_sn)
         session.is_active = True
         session.task_uuid = task.task_uuid if task else ""
         session.flight_started_at = timestamp
@@ -168,7 +224,7 @@ def refresh_session_with_position(position):
 
 def finalize_session_for_device(device_sn, ended_at=None):
     """
-    在无人机回舱时结束会话并写回任务统计。
+    Finalize active session when drone returns to dock and persist task stats.
     """
     normalized_sn = str(device_sn or "").strip()
     if not normalized_sn:
@@ -196,7 +252,7 @@ def finalize_session_for_device(device_sn, ended_at=None):
 
 def get_realtime_task_stats(task):
     """
-    返回任务的实时统计（若存在飞行会话，则覆盖为会话实时值）。
+    Return task stats merged with active session realtime values when available.
     """
     if not task:
         return {
@@ -209,15 +265,16 @@ def get_realtime_task_stats(task):
     distance = _to_float(task.flight_distance, 0.0)
     flight_active = False
 
-    device_sn = str(task.sn or "").strip()
-    if not device_sn:
-        return {
-            "flight_duration": duration,
-            "flight_distance": round(max(0.0, distance), 6),
-            "flight_active": False,
-        }
-
-    session = FlightStatsSession.objects.filter(device_sn=device_sn, is_active=True).first()
+    session = None
+    task_uuid = str(task.task_uuid or "").strip()
+    if task_uuid:
+        session = FlightStatsSession.objects.filter(task_uuid=task_uuid, is_active=True).first()
+    if not session:
+        dock_sn = str(task.sn or "").strip()
+        if dock_sn:
+            dock = DockStatus.objects.filter(dock_sn=dock_sn).order_by("-last_update_time", "-updated_at").first()
+            if dock and dock.drone_sn:
+                session = FlightStatsSession.objects.filter(device_sn=dock.drone_sn, is_active=True).first()
     if not session:
         return {
             "flight_duration": duration,
@@ -246,3 +303,5 @@ def get_realtime_task_stats(task):
         "flight_distance": round(max(0.0, distance), 6),
         "flight_active": flight_active,
     }
+
+
