@@ -778,7 +778,7 @@ export default {
         await mainTileset.readyPromise;
 
         // --- 计算位置校准矩阵 ---
-        const heightOffset = 0; // 如果模型整体高度不对，改这里（例如 -50）
+        const heightOffset = -40.2; // 如果模型整体高度不对，改这里（例如 -50）
         const boundingSphere = mainTileset.boundingSphere;
         const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center);
         
@@ -2067,7 +2067,7 @@ export default {
         this.applyFlightStatsSnapshot(cleared)
       }
     },
-    extractPositionData(position) {
+extractPositionData(position) {
       const rawData = this.parseRawData(position?.raw_data)
       const rawDataPayload = rawData?.data ? this.parseRawData(rawData.data) : null
       const directPayload = position?.data ? this.parseRawData(position.data) : null
@@ -2082,14 +2082,18 @@ export default {
         directPayload ||
         rawData ||
         {}
+        
       const toRadians = (value) => (Number.isFinite(value) ? value * (Math.PI / 180) : NaN)
+      
       const longitude = this.toNumber(
         position?.longitude ?? position?.lon ?? position?.lng ?? raw.longitude ?? raw.lon ?? raw.lng
       )
       const latitude = this.toNumber(
         position?.latitude ?? position?.lat ?? raw.latitude ?? raw.lat
       )
-      const altitude = this.toNumber(
+      
+      // 获取无人机的真实绝对高程 (RTK高度)
+      const realAltitude = this.toNumber(
         position?.altitude ??
         position?.height ??
         position?.relative_height ??
@@ -2099,6 +2103,15 @@ export default {
         raw.relative_height ??
         raw.ellipsoid_height
       )
+
+      // 定义当地真实海拔偏移量
+      const terrainElevationOffset = 40.2;
+      
+      // 扣除海拔高度，使无人机模型下沉贴合底图
+      const renderAltitude = Number.isFinite(realAltitude) 
+                             ? (realAltitude - terrainElevationOffset) 
+                             : NaN;
+
       const attitudeHead = this.toNumber(
         position?.attitude_head ??
         position?.attitude_heading ??
@@ -2107,6 +2120,7 @@ export default {
         raw.attitude_heading ??
         raw.attitude_yaw
       )
+      
       const heading = Number.isFinite(attitudeHead)
         ? toRadians(attitudeHead)
         : this.toNumber(
@@ -2117,15 +2131,25 @@ export default {
           raw.yaw ??
           raw.aircraft_heading
         )
+        
       const pitchRaw = this.toNumber(
         position?.attitude_pitch ?? position?.pitch ?? raw.attitude_pitch ?? raw.pitch
       )
       const rollRaw = this.toNumber(
         position?.attitude_roll ?? position?.roll ?? raw.attitude_roll ?? raw.roll
       )
+      
       const pitch = Number.isFinite(pitchRaw) ? toRadians(pitchRaw) : NaN
       const roll = Number.isFinite(rollRaw) ? toRadians(rollRaw) : NaN
-      return { longitude, latitude, altitude, heading, pitch, roll }
+      
+      return { 
+        longitude, 
+        latitude, 
+        altitude: renderAltitude, // 输出给 Cesium 的是扣除海拔后的渲染高度
+        heading, 
+        pitch, 
+        roll 
+      }
     },
     parseRawData(raw) {
       if (!raw) return null
@@ -2688,22 +2712,22 @@ export default {
       };
       applyNumber('inertiaSpin', 0.1);
       applyNumber('inertiaTranslate', 0.12);
-      applyNumber('inertiaZoom', 0.1);
-      applyNumber('minimumZoomRate', 0.05);
+      applyNumber('inertiaZoom', 0.3);
+      applyNumber('minimumZoomRate', 0.1);
       applyNumber('maximumZoomRate', 80000);
-      applyNumber('zoomFactor', 0.4);
+      applyNumber('zoomFactor', 2.0);
       applyNumber('rotateFactor', 0.15);
       applyNumber('tiltFactor', 0.15);
       applyNumber('lookFactor', 0.2);
       applyNumber('translateFactor', 0.2);
-      applyNumber('_zoomFactor', 0.4);
+      applyNumber('_zoomFactor', 2.0);
       applyNumber('_rotateFactor', 0.15);
       applyNumber('_tiltFactor', 0.15);
       applyNumber('_lookFactor', 0.2);
       applyNumber('_translateFactor', 0.2);
       applyNumber('minimumRotateRate', 0.005);
       applyNumber('maximumRotateRate', 0.2);
-      applyNumber('minimumTiltRate', 0.005);
+      applyNumber('minimumTiltRate', 0.05);
       applyNumber('maximumTiltRate', 0.2);
       applyNumber('rotateRateRangeAdjustment', 0.2);
       applyNumber('_rotateRateRangeAdjustment', 0.2);
@@ -2938,12 +2962,18 @@ export default {
     getWaylinePointPayload(point) {
       const longitude = this.toNumber(point?.lon ?? point?.longitude ?? point?.long ?? point?.x);
       const latitude = this.toNumber(point?.lat ?? point?.latitude ?? point?.y);
-      const altitude = this.getActionDetailAltitude(point);
-      const safeAltitude = Number.isFinite(altitude) ? altitude : 0;
+      // 设定机场的物理安装高度（相对于地面的高度）
+      // 获取航点的相对高度（如 15 米）
+      const relativeAltitude = this.getActionDetailAltitude(point);
+      // TODO: 目前写死为 20 米，后续可根据实际业务从配置或接口获取
+      const dockInstallHeight = 20;
+      const renderAltitude = Number.isFinite(relativeAltitude) 
+                               ? (relativeAltitude + dockInstallHeight) 
+                               : dockInstallHeight;
       return {
         longitude,
         latitude,
-        altitude: safeAltitude,
+        altitude: renderAltitude,
         heading: Number(point?.aircraft_heading || point?.heading || 0),
         gimbalPitch: Number(point?.gimbal_pitch || 0)
       };
@@ -3320,31 +3350,21 @@ export default {
       }
       return NaN;
     },
-    getAlarmPosition(alarm) {
+getAlarmPosition(alarm) {
       const latitudeCandidates = [
-        alarm?.latitude,
-        alarm?.lat,
-        alarm?.y,
-        alarm?.location?.latitude,
-        alarm?.location?.lat,
-        alarm?.position?.latitude,
-        alarm?.position?.lat
+        alarm?.latitude, alarm?.lat, alarm?.y,
+        alarm?.location?.latitude, alarm?.location?.lat,
+        alarm?.position?.latitude, alarm?.position?.lat
       ];
       const longitudeCandidates = [
-        alarm?.longitude,
-        alarm?.lon,
-        alarm?.lng,
-        alarm?.long,
-        alarm?.x,
-        alarm?.location?.longitude,
-        alarm?.location?.lon,
-        alarm?.location?.lng,
-        alarm?.position?.longitude,
-        alarm?.position?.lon,
-        alarm?.position?.lng
+        alarm?.longitude, alarm?.lon, alarm?.lng, alarm?.long, alarm?.x,
+        alarm?.location?.longitude, alarm?.location?.lon, alarm?.location?.lng,
+        alarm?.position?.longitude, alarm?.position?.lon, alarm?.position?.lng
       ];
+      
       let latitude = NaN;
       let longitude = NaN;
+      
       for (const candidate of latitudeCandidates) {
         const value = this.toNumber(candidate);
         if (Number.isFinite(value)) {
@@ -3359,12 +3379,24 @@ export default {
           break;
         }
       }
+
+      // 获取告警点的真实绝对高程（包含当地海拔）
+      const realAltitude = this.getAlarmAltitude(alarm);
+      
+      // 定义当地真实海拔偏移量
+      const terrainElevationOffset = 40.2;
+      
+      // 扣除海拔高度，使告警点下沉贴合底图
+      const renderAltitude = Number.isFinite(realAltitude) 
+                             ? (realAltitude - terrainElevationOffset) 
+                             : NaN;
+
       return {
         latitude,
         longitude,
-        altitude: this.getAlarmAltitude(alarm)
+        altitude: renderAltitude
       };
-    }
+    },
   }
 }
 </script>
