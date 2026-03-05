@@ -2966,7 +2966,7 @@ extractPositionData(position) {
       // 获取航点的相对高度（如 15 米）
       const relativeAltitude = this.getActionDetailAltitude(point);
       // TODO: 目前写死为 20 米，后续可根据实际业务从配置或接口获取
-      const dockInstallHeight = 20;
+      const dockInstallHeight = 0;
       const renderAltitude = Number.isFinite(relativeAltitude) 
                                ? (relativeAltitude + dockInstallHeight) 
                                : dockInstallHeight;
