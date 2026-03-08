@@ -86,6 +86,7 @@ from .serializers import (
 
 from .filters import AlarmFilter, WaylineImageFilter
 from .alarm_dashboard_stats import resolve_window, upsert_alarm_dashboard_stats
+from .alarm_dashboard_cache import get_alarm_dashboard_cache
 from .flight_stats_tracker import get_realtime_task_stats
 from .permissions import IsSystemAdmin
 from .pagination import StandardResultsSetPagination
@@ -4087,6 +4088,65 @@ def alarm_dashboard_stats_summary(request):
             "computed_at": obj.computed_at.isoformat() if obj.computed_at else None,
         }
     )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def alarm_dashboard_cache_summary(request):
+    """
+    告警大屏聚合缓存读取接口。
+    GET /api/v1/alarm-dashboard-cache/summary/?days=30
+    可选参数:
+      - refresh=1: 缓存不存在时即时重算并写入
+    """
+    try:
+        days = int(request.query_params.get("days", request.query_params.get("range_days", 30)))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(days, 1)
+    refresh = str(request.query_params.get("refresh", "0")).lower() in {"1", "true", "yes"}
+
+    obj = get_alarm_dashboard_cache(days, refresh_if_missing=refresh)
+
+    if not obj:
+        return Response(
+            {
+                "rangeDays": days,
+                "updatedAt": None,
+                "window": {
+                    "start": None,
+                    "end": None,
+                },
+                "safetyStats": {
+                    "safetyDays": 0,
+                    "todayAlarms": 0,
+                    "monthAlarms": 0,
+                    "yearAlarms": 0,
+                    "latestAlarmAt": None,
+                },
+                "detectTypeStats": {"total": 0, "series": [], "window": None},
+                "handleRateStats": {"total": 0, "series": [], "window": None},
+                "flightStats": {
+                    "totalTasks": 0,
+                    "byAirport": [],
+                    "distanceKm": 0,
+                    "durationHours": 0,
+                    "window": None,
+                },
+                "waylineStats": {"total": 0, "series": [], "window": None},
+                "hourlyDistribution": [],
+                "handleDurationByType": {},
+                "lineChart": {"categories": [], "months": [], "series": []},
+                "trendDetailMap": {},
+                "airportRiskRows": [],
+            }
+        )
+
+    payload = obj.dashboard_data or {}
+    if "rangeDays" not in payload:
+        payload["rangeDays"] = obj.range_days
+    payload["updatedAt"] = obj.updated_at.isoformat() if obj.updated_at else payload.get("updatedAt")
+    return Response(payload)
 
 
 class WaylineFingerprintManager:

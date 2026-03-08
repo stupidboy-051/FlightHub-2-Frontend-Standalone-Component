@@ -195,6 +195,20 @@ class AlarmDashboardStats(models.Model):
 # 2. 巡检任务与图片 (过程数据)
 # ----------------------------------------------------------------------
 
+class AlarmDashboardCache(models.Model):
+    range_days = models.PositiveIntegerField(unique=True, verbose_name="统计范围(天)")
+    dashboard_data = models.JSONField(default=dict, verbose_name="大屏缓存JSON")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "告警大屏聚合缓存"
+        verbose_name_plural = "告警大屏聚合缓存"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"dashboard cache ({self.range_days}d)"
+
+
 class InspectTask(models.Model):
     """
     巡检任务：一次无人机飞行任务对应的一批图片

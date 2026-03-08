@@ -762,6 +762,13 @@ export default {
     return { isAdmin: true, total, users }
   },
 
+  async getAlarmDashboardCacheByRange({ days = 30, refresh = false } = {}) {
+    const params = { days }
+    if (refresh) params.refresh = 1
+    const res = await alarmApi.getAlarmDashboardCache(params)
+    return res || {}
+  },
+
   async getSafetyStats() {
     const now = new Date()
 

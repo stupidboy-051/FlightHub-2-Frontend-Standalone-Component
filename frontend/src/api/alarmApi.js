@@ -1,6 +1,5 @@
 import axios from 'axios'
 
-// 创建axios实例
 const api = axios.create({
   baseURL: process.env.VUE_APP_API_BASE_URL || '/api/v1',
   timeout: 10000,
@@ -9,141 +8,78 @@ const api = axios.create({
   }
 })
 
-// 请求拦截器
 api.interceptors.request.use(
   config => {
-    // 携带登录 token，防止需要认证的请求返回 401
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Token ${token}`
     }
     return config
   },
-  error => {
-    return Promise.reject(error)
-  }
+  error => Promise.reject(error)
 )
 
-// 响应拦截器
 api.interceptors.response.use(
-  response => {
-    return response.data
-  },
+  response => response.data,
   error => {
-    console.error('API请求错误:', error)
+    console.error('API request error:', error)
     return Promise.reject(error)
   }
 )
 
-// 告警信息API服务
 export default {
-  // 获取告警列表
   async getAlarms(params = {}) {
-    try {
-      const response = await api.get('/alarms/', { params })
-      return response
-    } catch (error) {
-      console.error('获取告警列表失败:', error)
-      throw error
-    }
+    const response = await api.get('/alarms/', { params })
+    return response
   },
 
-  // 获取航线列表
   async getWaylines(params = {}) {
-    try {
-      const response = await api.get('/waylines/', { params })
-      return response
-    } catch (error) {
-      console.error('获取航线列表失败:', error)
-      throw error
-    }
+    const response = await api.get('/waylines/', { params })
+    return response
   },
 
-  // 获取单条航线详情（含航迹点）
   async getWaylineDetail(id) {
-    try {
-      const response = await api.get(`/waylines/${id}/`)
-      return response
-    } catch (error) {
-      console.error('获取航线详情失败:', error)
-      throw error
-    }
+    const response = await api.get(`/waylines/${id}/`)
+    return response
   },
 
-  // 获取单个告警详情
   async getAlarmDetail(alarmId) {
-    try {
-      const response = await api.get(`/alarms/${alarmId}/`)
-      return response
-    } catch (error) {
-      console.error('获取告警详情失败:', error)
-      throw error
-    }
+    const response = await api.get(`/alarms/${alarmId}/`)
+    return response
   },
 
-  // 创建新告警
   async createAlarm(alarmData) {
-    try {
-      const response = await api.post('/alarms/', alarmData)
-      return response
-    } catch (error) {
-      console.error('创建告警失败:', error)
-      throw error
-    }
+    const response = await api.post('/alarms/', alarmData)
+    return response
   },
 
-  // 更新告警
   async updateAlarm(alarmId, alarmData) {
-    try {
-      const response = await api.put(`/alarms/${alarmId}/`, alarmData)
-      return response
-    } catch (error) {
-      console.error('更新告警失败:', error)
-      throw error
-    }
+    const response = await api.put(`/alarms/${alarmId}/`, alarmData)
+    return response
   },
 
-  // 部分更新告警（如状态）
   async patchAlarm(alarmId, alarmData) {
-    try {
-      const response = await api.patch(`/alarms/${alarmId}/`, alarmData)
-      return response
-    } catch (error) {
-      console.error('部分更新告警失败:', error)
-      throw error
-    }
+    const response = await api.patch(`/alarms/${alarmId}/`, alarmData)
+    return response
   },
 
-  // 删除告警
   async deleteAlarm(alarmId) {
-    try {
-      const response = await api.delete(`/alarms/${alarmId}/`)
-      return response
-    } catch (error) {
-      console.error('删除告警失败:', error)
-      throw error
-    }
+    const response = await api.delete(`/alarms/${alarmId}/`)
+    return response
   },
 
-  // 获取告警类型列表
   async getAlarmCategories() {
-    try {
-      const response = await api.get('/alarm-categories/')
-      return response
-    } catch (error) {
-      console.error('获取告警类型列表失败:', error)
-      throw error
-    }
+    const response = await api.get('/alarm-categories/')
+    return response
   },
 
-  // 获取首页告警统计缓存
   async getAlarmDashboardStats(params = {}) {
-    try {
-      const response = await api.get('/alarm-dashboard-stats/summary/', { params })
-      return response
-    } catch (error) {
-      console.error('获取告警看板统计缓存失败:', error)
-      throw error
-    }
+    const response = await api.get('/alarm-dashboard-stats/summary/', { params })
+    return response
+  },
+
+  async getAlarmDashboardCache(params = {}) {
+    const response = await api.get('/alarm-dashboard-cache/summary/', { params })
+    return response
   }
 }

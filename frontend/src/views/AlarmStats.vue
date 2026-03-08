@@ -117,11 +117,11 @@
         <article class="kpi-card glass-panel">
           <div class="kpi-title">飞行风险密度</div>
           <div class="big-number warn">
-            <template v-if="alarmDensityPer100Km !== null">
-              {{ alarmDensityPer100Km.toFixed(2) }}
+            <template v-if="alarmDensityPerKm !== null">
+              {{ alarmDensityPerKm.toFixed(2) }}
             </template>
             <template v-else>--</template>
-            <span>条 / 百公里</span>
+            <span>条 / 每公里</span>
           </div>
           <div class="meta-note">用于衡量飞行任务密度下的告警风险暴露程度</div>
         </article>
@@ -209,12 +209,32 @@
           </div>
 
           <div class="wayline-rank">
-            <h4>航线告警排行</h4>
-            <div v-if="waylineRanking.length" class="rank-list">
-              <div v-for="item in waylineRanking" :key="item.id" class="rank-item">
-                <span class="dot" :style="{ background: item.color || '#38bdf8' }"></span>
-                <span class="name" :title="item.name">{{ item.name }}</span>
-                <span class="value">{{ formatNumber(item.value) }}</span>
+            <h4>航线告警排行（TOP8）</h4>
+            <div v-if="waylinePieSlices.length" class="rank-pie-layout">
+              <div class="pie-shell">
+                <svg class="wayline-pie-svg" viewBox="0 0 220 220">
+                  <circle class="pie-track" cx="110" cy="110" r="84" />
+                  <path
+                    v-for="slice in waylinePieSlices"
+                    :key="`pie-${slice.id}-${slice.index}`"
+                    class="pie-slice"
+                    :d="slice.path"
+                    :fill="slice.color"
+                    @mouseenter="handleWaylineSliceHover($event, slice)"
+                    @mouseleave="hideTooltip"
+                  />
+                </svg>
+                <div class="pie-total">
+                  <b>{{ formatNumber(waylinePieTotal) }}</b>
+                  <span>总告警</span>
+                </div>
+              </div>
+              <div class="rank-list pie-legend">
+                <div v-for="item in waylinePieSlices" :key="`rank-${item.id}-${item.index}`" class="rank-item">
+                  <span class="dot" :style="{ background: item.color }"></span>
+                  <span class="name" :title="item.name">{{ item.name }}</span>
+                  <span class="value">{{ formatNumber(item.value) }}</span>
+                </div>
               </div>
             </div>
             <div v-else class="empty-sub">暂无航线统计</div>
@@ -223,7 +243,7 @@
       </section>
 
       <section class="bottom-grid">
-        <article class="bottom-card glass-panel">
+        <article class="bottom-card glass-panel handling-card">
           <div class="panel-header small">
             <div>
               <h3>处置效率分析</h3>
@@ -271,7 +291,6 @@
           <div class="panel-header small">
             <div>
               <h3>告警深度分析</h3>
-              <p>类型结构 + 时段高发分布</p>
             </div>
           </div>
 
@@ -306,7 +325,7 @@
           </div>
         </article>
 
-        <article class="bottom-card glass-panel">
+        <article class="bottom-card glass-panel flight-card">
           <div class="panel-header small">
             <div>
               <h3>飞行与业务关联</h3>
@@ -379,7 +398,6 @@
 </template>
 
 <script>
-import alarmApi from '@/api/alarmApi'
 import homeDashboardApi from '@/api/homeDashboardApi'
 import DonutRing from '@/components/dashboard/DonutRing.vue'
 
@@ -400,28 +418,11 @@ const SERIES_COLORS = [
   '#4ade80'
 ]
 
-const HANDLED_STATUS_SET = new Set([
-  'COMPLETED',
-  'DONE',
-  'FINISHED',
-  'RESOLVED',
-  'CLOSED',
-  'PROCESSED',
-  'HANDLED'
-])
-
 const TYPE_NAME_MAP = {
   rail: '铁路',
   contactline: '接触网',
   bridge: '桥梁',
   protected_area: '保护区'
-}
-
-const TYPE_ALIASES = {
-  rail: ['rail', 'railway', 'rail_line', 'rail-line', 'railway_line'],
-  contactline: ['contactline', 'contact_line', 'contact-line', 'catenary', 'contactwire'],
-  bridge: ['bridge', 'bridge_line', 'bridge-line'],
-  protected_area: ['protected_area', 'protected-area', 'protectedarea', 'protected', 'protected-zone']
 }
 
 const TREND_TYPE_ORDER = ['rail', 'contactline', 'bridge', 'protected_area']
@@ -453,9 +454,8 @@ export default {
       },
 
       trendMonths: [],
-      rangeAlarms: [],
-      trendAlarms: [],
-      waylineNameMap: {},
+      trendDetailMap: {},
+      airportRiskRowsData: [],
 
       safetyStats: {
         safetyDays: 0,
@@ -525,7 +525,7 @@ export default {
     totalAlarms() {
       const total = Number(this.detectTypeStats?.total)
       if (Number.isFinite(total) && total >= 0) return total
-      return this.rangeAlarms.length
+      return 0
     },
     handledTotal() {
       return (this.handlingRows || []).reduce((sum, row) => sum + row.handled, 0)
@@ -538,10 +538,10 @@ export default {
       if (!total) return 0
       return (this.handledTotal / total) * 100
     },
-    alarmDensityPer100Km() {
+    alarmDensityPerKm() {
       const distance = this.toFiniteNumber(this.flightStats?.distanceKm, 0)
       if (distance <= 0) return null
-      return (this.totalAlarms / distance) * 100
+      return this.totalAlarms / distance
     },
     safetyScore() {
       const today = this.toFiniteNumber(this.safetyStats.todayAlarms, 0)
@@ -654,47 +654,57 @@ export default {
     },
     waylineRanking() {
       const list = Array.isArray(this.waylineStats?.series) ? this.waylineStats.series : []
-      return list
+      const normalized = list
         .filter(item => item && item.id !== '__OTHER__')
         .map(item => ({
           ...item,
-          name: this.resolveWaylineNameById(item.id)
+          value: this.toFiniteNumber(item.value, 0),
+          name: item.name || String(item.id || '未知航线')
         }))
-        .slice(0, 6)
+      return normalized
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 8)
+        .map((item, index) => ({
+          ...item,
+          color: item.color || SERIES_COLORS[index % SERIES_COLORS.length]
+        }))
+    },
+    waylinePieTotal() {
+      return this.waylineRanking.reduce((sum, item) => sum + this.toFiniteNumber(item.value, 0), 0)
+    },
+    waylinePieSlices() {
+      const total = this.waylinePieTotal
+      if (total <= 0) return []
+
+      let startAngle = -90
+      return this.waylineRanking.map((item, index) => {
+        const value = this.toFiniteNumber(item.value, 0)
+        const ratio = value / total
+        const sweep = ratio * 360
+        const endAngle = startAngle + sweep
+        const path = this.buildPieSlicePath(110, 110, 84, startAngle, endAngle)
+
+        const slice = {
+          ...item,
+          index,
+          ratio,
+          path
+        }
+        startAngle = endAngle
+        return slice
+      })
     },
     airportRiskRows() {
-      const list = Array.isArray(this.flightStats?.byAirport) ? this.flightStats.byAirport : []
-      if (!list.length) return []
-
-      const normalized = list.map(item => {
-        const distanceKm = this.toFiniteNumber(item.distanceKm, 0)
-        return {
-          dockSn: item.dockSn || item.dock_sn || '',
-          name: item.name || item.dockSn || item.dock_sn || '未知机场',
-          taskCount: this.toFiniteNumber(item.taskCount, 0),
-          distanceKm,
-          durationHours: this.toFiniteNumber(item.durationHours, 0)
-        }
-      })
-
-      const avgDistance = normalized.reduce((sum, item) => sum + item.distanceKm, 0) / Math.max(normalized.length, 1)
-      const baseRisk = this.toFiniteNumber(this.alarmDensityPer100Km, 0)
-      const rows = normalized.map(item => {
-        const distanceFactor = avgDistance > 0 ? item.distanceKm / avgDistance : 0
-        const riskIndex = baseRisk * (distanceFactor || 0.1)
-        return {
-          ...item,
-          riskIndex
-        }
-      })
-
-      const maxRisk = Math.max(...rows.map(item => item.riskIndex), 1)
-      return rows
-        .map(item => ({
-          ...item,
-          riskPct: (item.riskIndex / maxRisk) * 100
-        }))
-        .sort((a, b) => b.riskIndex - a.riskIndex)
+      const rows = Array.isArray(this.airportRiskRowsData) ? this.airportRiskRowsData : []
+      return rows.map(item => ({
+        dockSn: item.dockSn || item.dock_sn || '',
+        name: item.name || item.dockSn || item.dock_sn || '未知机场',
+        taskCount: this.toFiniteNumber(item.taskCount, 0),
+        distanceKm: this.toFiniteNumber(item.distanceKm, 0),
+        durationHours: this.toFiniteNumber(item.durationHours, 0),
+        riskIndex: this.toFiniteNumber(item.riskIndex, 0),
+        riskPct: this.toFiniteNumber(item.riskPct, 0)
+      }))
     }
   },
   mounted() {
@@ -709,290 +719,64 @@ export default {
 
       try {
         const days = this.selectedDays
-        this.initTrendMonths()
-
-        const [
-          safetyRes,
-          detectRes,
-          handleRes,
-          flightRes,
-          waylineRes,
-          waylineListRes,
-          rangeAlarms,
-          trendAlarms
-        ] = await Promise.all([
-          homeDashboardApi.getSafetyStats(),
-          homeDashboardApi.getDetectTypeStatsByRange({ days }),
-          homeDashboardApi.getAlarmHandleRateStatsByRange({ days }),
-          homeDashboardApi.getFlightStatsByRange({ days }),
-          homeDashboardApi.getAlertWaylineStats({ days, topN: 8 }),
-          this.fetchAllWaylinesByPaging(),
-          this.fetchAllAlarmsByRange(days),
-          this.fetchAllAlarmsByRange(365)
-        ])
-
-        const waylineList = Array.isArray(waylineListRes) ? waylineListRes : this.normalizeList(waylineListRes)
-        this.waylineNameMap = waylineList.reduce((map, item) => {
-          const name = item?.name || ''
-          const dbId = item?.id
-          const bizId = item?.wayline_id
-
-          if (dbId !== undefined && dbId !== null && String(dbId) !== '') {
-            map[String(dbId)] = name || map[String(dbId)] || String(dbId)
-          }
-          if (bizId !== undefined && bizId !== null && String(bizId) !== '') {
-            map[String(bizId)] = name || map[String(bizId)] || String(bizId)
-          }
-          return map
-        }, {})
+        const payload = await homeDashboardApi.getAlarmDashboardCacheByRange({ days })
 
         this.safetyStats = {
-          safetyDays: this.toFiniteNumber(safetyRes?.safetyDays, 0),
-          todayAlarms: this.toFiniteNumber(safetyRes?.todayAlarms, 0),
-          monthAlarms: this.toFiniteNumber(safetyRes?.monthAlarms, 0),
-          yearAlarms: this.toFiniteNumber(safetyRes?.yearAlarms, 0),
-          latestAlarmAt: safetyRes?.latestAlarmAt || null
+          safetyDays: this.toFiniteNumber(payload?.safetyStats?.safetyDays, 0),
+          todayAlarms: this.toFiniteNumber(payload?.safetyStats?.todayAlarms, 0),
+          monthAlarms: this.toFiniteNumber(payload?.safetyStats?.monthAlarms, 0),
+          yearAlarms: this.toFiniteNumber(payload?.safetyStats?.yearAlarms, 0),
+          latestAlarmAt: payload?.safetyStats?.latestAlarmAt || null
         }
 
         this.detectTypeStats = {
-          total: this.toFiniteNumber(detectRes?.total, 0),
-          series: Array.isArray(detectRes?.series) ? detectRes.series : [],
-          window: detectRes?.window || null
+          total: this.toFiniteNumber(payload?.detectTypeStats?.total, 0),
+          series: Array.isArray(payload?.detectTypeStats?.series) ? payload.detectTypeStats.series : [],
+          window: payload?.detectTypeStats?.window || payload?.window || null
         }
 
         this.handleRateStats = {
-          total: this.toFiniteNumber(handleRes?.total, 0),
-          series: Array.isArray(handleRes?.series) ? handleRes.series : [],
-          window: handleRes?.window || null
+          total: this.toFiniteNumber(payload?.handleRateStats?.total, 0),
+          series: Array.isArray(payload?.handleRateStats?.series) ? payload.handleRateStats.series : [],
+          window: payload?.handleRateStats?.window || payload?.window || null
         }
 
         this.flightStats = {
-          totalTasks: this.toFiniteNumber(flightRes?.totalTasks, 0),
-          byAirport: Array.isArray(flightRes?.byAirport) ? flightRes.byAirport : [],
-          distanceKm: this.toFiniteNumber(flightRes?.distanceKm, 0),
-          durationHours: this.toFiniteNumber(flightRes?.durationHours, 0),
-          window: flightRes?.window || null
+          totalTasks: this.toFiniteNumber(payload?.flightStats?.totalTasks, 0),
+          byAirport: Array.isArray(payload?.flightStats?.byAirport) ? payload.flightStats.byAirport : [],
+          distanceKm: this.toFiniteNumber(payload?.flightStats?.distanceKm, 0),
+          durationHours: this.toFiniteNumber(payload?.flightStats?.durationHours, 0),
+          window: payload?.flightStats?.window || payload?.window || null
         }
 
         this.waylineStats = {
-          total: this.toFiniteNumber(waylineRes?.total, 0),
-          series: Array.isArray(waylineRes?.series) ? waylineRes.series : [],
-          window: waylineRes?.window || null
+          total: this.toFiniteNumber(payload?.waylineStats?.total, 0),
+          series: Array.isArray(payload?.waylineStats?.series) ? payload.waylineStats.series : [],
+          window: payload?.waylineStats?.window || payload?.window || null
         }
 
-        this.rangeAlarms = rangeAlarms
-        this.trendAlarms = trendAlarms
+        this.hourlyDistribution = Array.isArray(payload?.hourlyDistribution) ? payload.hourlyDistribution : []
+        this.handleDurationByType =
+          payload?.handleDurationByType && typeof payload.handleDurationByType === 'object'
+            ? payload.handleDurationByType
+            : {}
 
-        this.hourlyDistribution = this.buildHourlyDistribution(rangeAlarms)
-        this.handleDurationByType = this.buildHandleDurationByType(rangeAlarms)
-        this.lineChart = this.buildTrendLineChart(trendAlarms)
+        this.lineChart = {
+          categories: Array.isArray(payload?.lineChart?.categories) ? payload.lineChart.categories : [],
+          series: Array.isArray(payload?.lineChart?.series) ? payload.lineChart.series : []
+        }
+        this.trendMonths = Array.isArray(payload?.lineChart?.months) ? payload.lineChart.months : []
+        this.trendDetailMap =
+          payload?.trendDetailMap && typeof payload.trendDetailMap === 'object' ? payload.trendDetailMap : {}
+        this.airportRiskRowsData = Array.isArray(payload?.airportRiskRows) ? payload.airportRiskRows : []
 
-        const latestAt = this.getLatestAlarmTime(rangeAlarms, trendAlarms)
-        this.lastUpdated = latestAt || new Date()
+        this.lastUpdated = this.parseDate(payload?.updatedAt) || new Date()
       } catch (err) {
         console.error('加载告警大屏失败', err)
         this.error = '加载统计数据失败，请稍后重试'
       } finally {
         this.loading = false
       }
-    },
-
-    initTrendMonths() {
-      const now = new Date()
-      const months = []
-      for (let i = 11; i >= 0; i--) {
-        const dt = new Date(now.getFullYear(), now.getMonth() - i, 1)
-        const start = new Date(dt.getFullYear(), dt.getMonth(), 1, 0, 0, 0, 0)
-        const end = new Date(dt.getFullYear(), dt.getMonth() + 1, 0, 23, 59, 59, 999)
-        months.push({
-          key: `${dt.getFullYear()}-${dt.getMonth()}`,
-          label: `${dt.getMonth() + 1}月`,
-          fullLabel: `${dt.getFullYear()}年${dt.getMonth() + 1}月`,
-          start,
-          end
-        })
-      }
-      this.trendMonths = months
-    },
-
-    async fetchAllAlarmsByRange(days = 30) {
-      const safeDays = Math.max(this.toFiniteNumber(days, 30), 1)
-      const now = new Date()
-      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
-      const start = new Date(end.getTime() - (safeDays - 1) * 24 * 60 * 60 * 1000)
-
-      const pageSize = 2000
-      let page = 1
-      let totalCount = null
-      const collected = []
-      let loops = 0
-
-      while (loops < 120) {
-        loops += 1
-        const res = await alarmApi.getAlarms({
-          page,
-          page_size: pageSize,
-          ordering: '-created_at',
-          start_date: this.formatDateParam(start),
-          end_date: this.formatDateParam(end)
-        })
-
-        const list = this.normalizeList(res)
-        collected.push(...list)
-
-        if (totalCount === null && typeof res?.count === 'number') {
-          totalCount = res.count
-        }
-
-        const hasNextFlag = Boolean(res?.next)
-        const needByCount = totalCount !== null ? collected.length < totalCount : false
-        const needBySize = list.length === pageSize
-        if (!(hasNextFlag || needByCount || needBySize)) break
-        page += 1
-      }
-
-      return collected
-    },
-
-    async fetchAllWaylinesByPaging() {
-      const pageSize = 200
-      let page = 1
-      let totalCount = null
-      let loops = 0
-
-      const collected = []
-      const seenKeys = new Set()
-
-      while (loops < 200) {
-        loops += 1
-        const res = await alarmApi.getWaylines({
-          page,
-          page_size: pageSize
-        })
-
-        const list = this.normalizeList(res)
-        let addedCount = 0
-        for (const item of list) {
-          const key = String(item?.id ?? item?.wayline_id ?? '')
-          if (!key || seenKeys.has(key)) continue
-          seenKeys.add(key)
-          collected.push(item)
-          addedCount += 1
-        }
-
-        if (totalCount === null && typeof res?.count === 'number') {
-          totalCount = res.count
-        }
-
-        const hasNextFlag = Boolean(res?.next)
-        const reachedByCount = totalCount !== null ? collected.length >= totalCount : false
-        const noProgress = addedCount === 0
-
-        if (reachedByCount || (!hasNextFlag && noProgress)) break
-        if (!hasNextFlag && list.length < pageSize) break
-
-        page += 1
-      }
-
-      return collected
-    },
-
-    buildTrendLineChart(alarms = []) {
-      const monthCount = this.trendMonths.length
-      if (!monthCount) {
-        return { categories: [], series: [] }
-      }
-
-      const typeBuckets = TREND_TYPE_ORDER.reduce((acc, key) => {
-        acc[key] = Array(monthCount).fill(0)
-        return acc
-      }, {})
-
-      for (const alarm of alarms) {
-        const createdAt = this.parseDate(alarm?.created_at)
-        const monthIdx = this.getTrendMonthIndex(createdAt)
-        if (monthIdx < 0) continue
-
-        const typeKey = this.resolveDetectTypeKey(alarm)
-        if (!typeBuckets[typeKey]) continue
-        typeBuckets[typeKey][monthIdx] += 1
-      }
-
-      const series = TREND_TYPE_ORDER.map((id, index) => {
-        const data = typeBuckets[id] || Array(monthCount).fill(0)
-        return {
-          id,
-          name: TYPE_NAME_MAP[id] || id,
-          color: TREND_TYPE_COLOR_MAP[id] || SERIES_COLORS[index % SERIES_COLORS.length],
-          data
-        }
-      })
-
-      return {
-        categories: this.trendMonths.map(item => item.label),
-        series
-      }
-    },
-
-    buildHourlyDistribution(alarms = []) {
-      const bins = Array.from({ length: 24 }, (_, hour) => ({
-        hour,
-        label: `${String(hour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:59`,
-        shortLabel: String(hour).padStart(2, '0'),
-        value: 0,
-        height: 0
-      }))
-
-      for (const alarm of alarms) {
-        const dt = this.parseDate(alarm?.created_at)
-        if (!dt || Number.isNaN(dt.getTime())) continue
-        const hour = dt.getHours()
-        if (hour >= 0 && hour < 24) bins[hour].value += 1
-      }
-
-      const max = Math.max(...bins.map(item => item.value), 1)
-      bins.forEach(item => {
-        item.height = (item.value / max) * 100
-      })
-      return bins
-    },
-
-    buildHandleDurationByType(alarms = []) {
-      const stats = {}
-      for (const alarm of alarms) {
-        if (!this.isHandledStatus(alarm)) continue
-
-        const createdAt = this.parseDate(alarm?.created_at)
-        const updatedAt = this.parseDate(alarm?.updated_at)
-        if (!createdAt || !updatedAt) continue
-        if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue
-
-        const diffMs = updatedAt.getTime() - createdAt.getTime()
-        if (diffMs < 0) continue
-
-        const hours = diffMs / (1000 * 60 * 60)
-        if (hours > 720) continue
-
-        const typeKey = this.resolveDetectTypeKey(alarm)
-        if (!stats[typeKey]) {
-          stats[typeKey] = { sum: 0, count: 0 }
-        }
-        stats[typeKey].sum += hours
-        stats[typeKey].count += 1
-      }
-
-      const result = {}
-      for (const [key, val] of Object.entries(stats)) {
-        if (val.count > 0) {
-          result[key] = val.sum / val.count
-        }
-      }
-      return result
-    },
-
-    getTrendMonthIndex(date) {
-      if (!date || Number.isNaN(date.getTime())) return -1
-      return this.trendMonths.findIndex(item => date >= item.start && date <= item.end)
     },
 
     getLinePath(values = []) {
@@ -1028,6 +812,42 @@ export default {
       return this.chart.height - this.chart.paddingY - innerHeight * ratio
     },
 
+    handleWaylineSliceHover(event, slice) {
+      this.showTooltip(event, slice.name, [
+        `告警 ${this.formatNumber(slice.value)} 条`,
+        `占比 ${(slice.ratio * 100).toFixed(1)}%`
+      ])
+    },
+
+    buildPieSlicePath(cx, cy, radius, startAngle, endAngle) {
+      const sweep = Math.max(endAngle - startAngle, 0)
+      if (sweep <= 0) return ''
+
+      if (sweep >= 359.999) {
+        return [
+          `M ${cx} ${cy}`,
+          `m 0 ${-radius}`,
+          `A ${radius} ${radius} 0 1 1 0 ${radius * 2}`,
+          `A ${radius} ${radius} 0 1 1 0 ${-radius * 2}`,
+          'Z'
+        ].join(' ')
+      }
+
+      const start = this.polarToCartesian(cx, cy, radius, startAngle)
+      const end = this.polarToCartesian(cx, cy, radius, endAngle)
+      const largeArcFlag = sweep > 180 ? 1 : 0
+
+      return `M ${cx} ${cy} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`
+    },
+
+    polarToCartesian(cx, cy, radius, angleDeg) {
+      const rad = (angleDeg * Math.PI) / 180
+      return {
+        x: cx + radius * Math.cos(rad),
+        y: cy + radius * Math.sin(rad)
+      }
+    },
+
     handlePointHover(event, series, point) {
       const month = this.trendMonths[point.index]
       if (!month) return
@@ -1042,20 +862,9 @@ export default {
       this.detailModal.waylineName = series.name
       this.detailModal.monthLabel = month.fullLabel
 
-      const filtered = this.trendAlarms
-        .filter(alarm => {
-          const dt = this.parseDate(alarm?.created_at)
-          if (!dt || Number.isNaN(dt.getTime())) return false
-          if (dt < month.start || dt > month.end) return false
-          return this.resolveDetectTypeKey(alarm) === String(series.id)
-        })
-        .sort((a, b) => {
-          const ta = this.parseDate(a?.created_at)?.getTime() || 0
-          const tb = this.parseDate(b?.created_at)?.getTime() || 0
-          return tb - ta
-        })
-
-      this.detailModal.alarms = filtered
+      const seriesDetails = this.trendDetailMap?.[series.id]
+      const monthAlarms = Array.isArray(seriesDetails?.[month.key]) ? seriesDetails[month.key] : []
+      this.detailModal.alarms = monthAlarms
       this.detailModal.loading = false
     },
 
@@ -1091,76 +900,15 @@ export default {
     },
 
     resolveWaylineName(alarm) {
+      const direct = alarm?.wayline_name || alarm?.waylineName
+      if (direct && String(direct).trim()) return String(direct).trim()
       const id = this.resolveWaylineId(alarm)
       return this.resolveWaylineNameById(id)
     },
 
     resolveWaylineNameById(id) {
       if (id === '__UNKNOWN__') return '未知航线'
-      const key = String(id)
-      const mapped = this.waylineNameMap[key]
-      if (mapped && String(mapped).trim()) return mapped
-      return key
-    },
-
-    resolveDetectTypeKey(alarm) {
-      const candidates = [
-        alarm?.category_details?.code,
-        alarm?.category_code,
-        alarm?.detect_type,
-        alarm?.type,
-        alarm?.category_details?.name,
-        alarm?.category_name
-      ]
-
-      for (const item of candidates) {
-        const key = this.matchDetectType(item)
-        if (key) return key
-      }
-      return '__OTHER__'
-    },
-
-    matchDetectType(raw) {
-      const value = String(raw || '').trim().toLowerCase()
-      if (!value) return null
-
-      if (TYPE_NAME_MAP[value]) return value
-      for (const [key, aliases] of Object.entries(TYPE_ALIASES)) {
-        if (aliases.includes(value)) return key
-      }
-
-      const compact = value.replace(/\s+/g, '')
-      if (compact.includes('铁路')) return 'rail'
-      if (compact.includes('接触网') || compact.includes('接触线')) return 'contactline'
-      if (compact.includes('桥梁')) return 'bridge'
-      if (compact.includes('保护区')) return 'protected_area'
-      return null
-    },
-
-    isHandledStatus(alarm) {
-      const direct = alarm?.handled ?? alarm?.is_processed ?? alarm?.processed ?? alarm?.is_handled
-      if (direct === true || direct === 1 || direct === '1') return true
-      const statusText = String(alarm?.status || '').trim().toUpperCase()
-      return HANDLED_STATUS_SET.has(statusText)
-    },
-
-    getLatestAlarmTime(...alarmGroups) {
-      const merged = alarmGroups.flat().filter(Boolean)
-      let latest = null
-      for (const alarm of merged) {
-        const dt = this.parseDate(alarm?.created_at)
-        if (!dt || Number.isNaN(dt.getTime())) continue
-        if (!latest || dt > latest) latest = dt
-      }
-      return latest
-    },
-
-    normalizeList(res) {
-      if (!res) return []
-      if (Array.isArray(res)) return res
-      if (Array.isArray(res.results)) return res.results
-      if (Array.isArray(res.data)) return res.data
-      return []
+      return String(id)
     },
 
     toFiniteNumber(value, fallback = 0) {
@@ -1183,13 +931,6 @@ export default {
       const numeric = Number(value)
       if (!Number.isFinite(numeric)) return '--'
       return Math.round(numeric).toLocaleString('zh-CN')
-    },
-
-    formatDateParam(date) {
-      const dt = this.parseDate(date)
-      if (!dt || Number.isNaN(dt.getTime())) return ''
-      const pad = num => String(num).padStart(2, '0')
-      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
     },
 
     formatDateTime(dateLike) {
@@ -1659,6 +1400,81 @@ export default {
   gap: 6px;
 }
 
+.wayline-rank {
+  margin-top: 8px;
+}
+
+.rank-pie-layout {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.pie-shell {
+  position: relative;
+  width: 172px;
+  height: 172px;
+  margin: 0 auto;
+}
+
+.wayline-pie-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.pie-track {
+  fill: rgba(15, 23, 42, 0.65);
+  stroke: rgba(148, 163, 184, 0.24);
+  stroke-width: 1;
+}
+
+.pie-slice {
+  stroke: rgba(6, 11, 23, 0.92);
+  stroke-width: 1;
+  transition: opacity 0.16s ease, filter 0.16s ease;
+}
+
+.pie-slice:hover {
+  opacity: 0.96;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.52));
+}
+
+.pie-total {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 86px;
+  height: 86px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(8, 15, 30, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 18px rgba(34, 211, 238, 0.12);
+}
+
+.pie-total b {
+  color: #f8fafc;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.pie-total span {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.pie-legend {
+  max-height: 172px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .rank-item,
 .legend-row {
   display: flex;
@@ -1692,10 +1508,26 @@ export default {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+  align-items: stretch;
+}
+
+.bottom-card {
+  height: 480px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stack-bars {
   display: grid;
+  gap: 8px;
+}
+
+.handling-card .stack-bars {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -1704,6 +1536,12 @@ export default {
   grid-template-columns: 76px 1fr auto;
   gap: 8px;
   align-items: center;
+}
+
+.handling-card .stack-row {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 4px 0;
 }
 
 .row-label {
@@ -1739,12 +1577,34 @@ export default {
   margin-top: 14px;
 }
 
+.handling-card .duration-panel {
+  margin-top: 10px;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.handling-card .duration-list {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .duration-row {
   display: grid;
   grid-template-columns: 70px 1fr 42px;
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+.handling-card .duration-row {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-bottom: 0;
 }
 
 .duration-name {
@@ -1822,6 +1682,14 @@ export default {
   gap: 6px;
 }
 
+.flight-card .airport-list {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .airport-head,
 .airport-row {
   display: grid;
@@ -1840,6 +1708,12 @@ export default {
 .airport-row {
   font-size: 12px;
   color: #cbd5e1;
+}
+
+.flight-card .airport-row {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 2px 0;
 }
 
 .risk-col {
@@ -2030,8 +1904,22 @@ export default {
     grid-template-columns: 1fr;
   }
 
+  .rank-pie-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pie-legend {
+    max-height: none;
+    width: 100%;
+  }
+
   .bottom-grid {
     grid-template-columns: 1fr;
+  }
+
+  .bottom-card {
+    height: auto;
+    min-height: 390px;
   }
 
   .donut-zone {
