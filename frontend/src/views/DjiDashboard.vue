@@ -3403,7 +3403,12 @@ getAlarmPosition(alarm) {
 
 <style scoped>
 .dashboard-premium {
-  min-height: 100%;
+  /* 使用绝对定位钉死在屏幕边缘，避免vh在部分浏览器计算误差导致溢出滚动 */
+  position: absolute; 
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -3413,7 +3418,7 @@ getAlarmPosition(alarm) {
   radial-gradient(circle at 80% 0, rgba(0, 153, 255, 0.06), transparent 30%),
   #0b1024;
   color: #e2e8f0;
-  overflow: visible;
+  overflow: hidden; /* 强制外层不滚动 */
 }
 
 /* 页面头部 */
@@ -3428,7 +3433,7 @@ getAlarmPosition(alarm) {
   border-radius: 16px;
   border: 1px solid rgba(0, 212, 255, 0.2);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  flex-shrink: 0;
+  flex-shrink: 0; /* 保护头部在空间不足时不被挤压 */
 }
 
 .detect-type-summary {
@@ -3584,21 +3589,21 @@ getAlarmPosition(alarm) {
 /* 主内容区 */
 .dashboard-content {
   flex: 1;
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  grid-template-rows: minmax(0, 1fr);
+  display: flex;
+  flex-direction: row; /* 从grid修改为flex，更易控高度 */
   gap: 24px;
-  min-height: 0;
-  overflow: visible;
+  min-height: 0; /* flex容器嵌套核心：防止子元素溢出 */
+  overflow: hidden;
 }
 
-/* 侧边面板 */
+/* 左侧面板 */
 .side-panel {
+  width: 320px;
+  flex-shrink: 0; /* 防止面板被挤压 */
   display: flex;
   flex-direction: column;
   gap: 20px;
   min-height: 0;
-  height: 100%;
   overflow: hidden;
 }
 
@@ -3606,8 +3611,8 @@ getAlarmPosition(alarm) {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  flex: 1;
   min-height: 0;
-  height: 100%;
   overflow: hidden;
 }
 
@@ -3619,6 +3624,7 @@ getAlarmPosition(alarm) {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .panel-header {
@@ -3661,7 +3667,8 @@ getAlarmPosition(alarm) {
 }
 
 .dock-panel {
-  flex: 0 0 auto;
+  flex: 1.15 1 0;
+  min-height: 0;
 }
 
 .dock-panel-body {
@@ -3669,7 +3676,9 @@ getAlarmPosition(alarm) {
   flex-direction: column;
   gap: 12px;
   padding: 12px;
-  flex: 0 0 auto;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .panel-action {
@@ -3721,9 +3730,10 @@ getAlarmPosition(alarm) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 320px;
-  overflow: auto;
-  flex: 0 0 auto;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .dock-item {
@@ -3822,6 +3832,7 @@ getAlarmPosition(alarm) {
 .dock-latest {
   padding-top: 10px;
   border-top: 1px solid rgba(148, 163, 184, 0.15);
+  flex-shrink: 0;
 }
 
 .dock-latest-header {
@@ -3889,8 +3900,16 @@ getAlarmPosition(alarm) {
 }
 
 .alarm-panel {
-  flex: 0 0 360px;
-  height: 360px;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.analysis-panel-group {
+  min-height: 0;
+}
+
+.analysis-filter-panel {
+  flex: 0 0 auto;
 }
 
 .analysis-filter-body {
@@ -3941,13 +3960,16 @@ getAlarmPosition(alarm) {
 }
 
 .analysis-wayline-panel {
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .analysis-wayline-body {
   padding: 12px;
-  overflow: auto;
-  max-height: 320px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .analysis-wayline-list {
@@ -4002,14 +4024,22 @@ getAlarmPosition(alarm) {
 }
 
 .analysis-alarm-panel {
-  flex: 0 0 360px;
-  height: 360px;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .alarm-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.alarm-panel-body > * {
   flex: 1 1 auto;
-  height: 100%;
-  overflow: hidden;
+  min-height: 0;
 }
 
 .monitor-body {
@@ -4037,30 +4067,36 @@ getAlarmPosition(alarm) {
 
 /* 中间主视图 */
 .main-view {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
+/* 视频和3D网格 */
 .viewer-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: row;
   gap: 20px;
-  height: 100%;
-  min-height: 0;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.viewer-grid.analysis-mode {
-  grid-template-columns: 1fr;
+.viewer-grid > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.viewer-grid.analysis-mode .live-monitor-section {
+  display: none; /* 分析模式隐藏直播，让3D视图自然撑满全宽 */
 }
 
 .cesium-section {
   flex: 1;
-  min-height: 500px;
+  min-height: 0;
   background: rgba(26, 31, 58, 0.6);
   backdrop-filter: blur(10px);
   border-radius: 16px;
@@ -4374,7 +4410,7 @@ getAlarmPosition(alarm) {
 /* 直播监控区域样式 */
 .live-monitor-section {
   flex: 1;
-  min-height: 500px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -4480,18 +4516,17 @@ getAlarmPosition(alarm) {
 
 .live-player-wrapper {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   padding: 12px;
   display: flex;
   flex-direction: column;
 }
 
-
+/* 屏幕变小时，平分布局，绝对防止内容溢出 */
 @media (max-width: 1180px) {
   .dashboard-content {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto;
-    height: auto;
+    flex-direction: column; /* 小屏上下堆叠 */
   }
 
   .mode-switch {
@@ -4501,32 +4536,37 @@ getAlarmPosition(alarm) {
   }
 
   .panel-group {
-    height: auto;
-    overflow: visible;
-  }
-
-  .analysis-wayline-body {
-    max-height: none;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    flex: 1; 
+    min-height: 0;
+    overflow: hidden;
   }
 
   .side-panel {
+    width: 100%;
+    flex: 1; 
     order: 2;
-    height: auto;
-    overflow: visible;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .main-view {
+    width: 100%;
+    flex: 1; 
     order: 1;
-    height: auto;
+    min-height: 0;
   }
 
   .viewer-grid {
-    grid-template-columns: 1fr;
-    height: auto;
+    flex-direction: column;
+    min-height: 0;
   }
 
   .alarm-panel-body {
     max-height: none;
+    min-height: 0;
   }
 }
 </style>
@@ -4545,5 +4585,15 @@ getAlarmPosition(alarm) {
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
+}
+
+/* 确保全局绝对无滚动条（严格控制外层） */
+body, html, #app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important; /* 切断浏览器默认滚动 */
+  box-sizing: border-box;
 }
 </style>
