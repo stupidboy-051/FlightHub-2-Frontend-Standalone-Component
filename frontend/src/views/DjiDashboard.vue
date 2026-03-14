@@ -623,20 +623,17 @@ export default {
     this.actionDetailEntities = []
     this.pickHandler = null
   },
-  mounted() {
+  async mounted() {
     this.checkFh2Availability()
     this.initSelectedWaylineFromRoute()
     this.loadDockList()
     this.startDockPolling()
     this.startFlightStatsPolling()
-      this.$nextTick(() => {
-        setTimeout(async () => {
-          await this.loadComponentConfig()
-          await this.initCesium()
-          this.focusOnModel()
-        }, 500)
-      })
-    },
+
+    await this.$nextTick()
+    await this.loadComponentConfig()
+    await this.initCesium()
+  },
   beforeUnmount() {
     if (this.fh2CheckTimer) {
       clearTimeout(this.fh2CheckTimer)
@@ -691,6 +688,92 @@ export default {
         this.checkFh2Availability()
       }, 1000)
     },
+    getAppBaseUrl() {
+      const baseUrl = process.env.BASE_URL || '/'
+      if (!baseUrl) return '/'
+      return baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+    },
+    resolveAssetPath(relativePath = '') {
+      const normalizedPath = String(relativePath || '').replace(/^\/+/, '')
+      return `${this.getAppBaseUrl()}${normalizedPath}`
+    },
+    getSiteModelUrls() {
+      return [
+        'models/site_model/part1_terrain/tileset.json',
+        'models/site_model/part2_poles/tileset.json',
+        'models/site_model/part3_lines/tileset.json'
+      ].map(path => this.resolveAssetPath(path))
+    },
+    waitForNextFrame() {
+      return new Promise(resolve => {
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => resolve())
+          return
+        }
+        setTimeout(resolve, 16)
+      })
+    },
+    setFallbackCameraView(Cesium) {
+      if (!this.viewer) return
+      this.viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(116.39, 39.90, 4000),
+        orientation: {
+          heading: 0,
+          pitch: Cesium.Math.toRadians(-90),
+          roll: 0
+        }
+      })
+    },
+    async loadSiteModelTilesets(Cesium) {
+      if (!this.viewer) return []
+
+      const modelUrls = this.getSiteModelUrls()
+      const loadPromises = modelUrls.map(async url => {
+        try {
+          return await Cesium.Cesium3DTileset.fromUrl(url, {
+            maximumScreenSpaceError: 16,
+            skipLevelOfDetail: true,
+            cullWithChildrenBounds: true
+          })
+        } catch (error) {
+          throw new Error(`模型加载失败: ${url}，${error.message}`)
+        }
+      })
+
+      const tilesets = await Promise.all(loadPromises)
+      if (!this.viewer) return tilesets
+
+      tilesets.forEach(tileset => this.viewer.scene.primitives.add(tileset))
+
+      const mainTileset = tilesets[0]
+      if (!mainTileset) {
+        this.tilesets = tilesets
+        return tilesets
+      }
+
+      await mainTileset.readyPromise
+      if (!mainTileset.boundingSphere) {
+        this.tilesets = tilesets
+        return tilesets
+      }
+
+      const heightOffset = -40.2
+      const boundingSphere = mainTileset.boundingSphere
+      const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center)
+      const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0)
+      const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset)
+      const translation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3())
+      const modelMatrix = Cesium.Matrix4.fromTranslation(translation)
+
+      tilesets.forEach(tileset => {
+        tileset.modelMatrix = modelMatrix
+      })
+
+      this.tilesets = tilesets
+      this.viewer.scene.requestRender()
+      await this.waitForNextFrame()
+      return tilesets
+    },
     async initCesium() {
       if (this.viewer) return
 
@@ -701,7 +784,7 @@ export default {
         this.cesiumLib = Cesium
         const tokenFromConfig = this.componentConfig?.cesium_ion_token || this.componentConfig?.cesiumIonToken
         Cesium.Ion.defaultAccessToken =
-            tokenFromConfig || process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
+          tokenFromConfig || process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
 
         const container = this.$refs.cesiumContainer
         if (!container) throw new Error('找不到 Cesium 容器')
@@ -723,78 +806,24 @@ export default {
           creditContainer: document.createElement('div')
         })
 
-        this.viewer.scene.globe.depthTestAgainstTerrain = false;
-        this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
-
+        this.viewer.scene.globe.depthTestAgainstTerrain = false
+        this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = false
         this.viewer.scene.globe.show = this.globeVisible
+
         await this.setupImageryLayers(Cesium)
         this.tuneCameraControls(this.viewer.scene.screenSpaceCameraController)
         this.setupPickHandler(Cesium)
-
         this.viewer.resize()
-        const centerLon = 116.39;
-        const centerLat = 39.90;
-
-        this.viewer.camera.setView({
-          destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 4000),
-          orientation: {
-            heading: 0,
-            pitch: Cesium.Math.toRadians(-90),
-            roll: 0
-          }
-        });
 
         try {
-  // 定义三个模型的路径
-  // part1_terrain, part2_poles, part3_lines
-  const modelUrls = [
-    '/models/site_model/part1_terrain/tileset.json', // 地形/主模型
-    '/models/site_model/part2_poles/tileset.json',   // 杆塔
-    '/models/site_model/part3_lines/tileset.json'    // 线路
-  ];
-
-  // 并行请求加载
-  const loadPromises = modelUrls.map(url => {
-    return Cesium.Cesium3DTileset.fromUrl(url, {
-      maximumScreenSpaceError: 16, // 数值越大越模糊但越流畅
-      skipLevelOfDetail: true,     // 开启跳级加载优化
-      cullWithChildrenBounds: true // 优化剔除
-    });
-  });
-
-  // 等待所有模型加载完成，并赋值给 this.tilesets
-  this.tilesets = await Promise.all(loadPromises);
-
-  if (!this.viewer) return;
-
-  // 这里的逻辑是为了确保三个模型“对齐”
-  // 我们以第一个模型（通常是地形）的中心点为基准，计算一个矩阵，然后应用给所有三个模型
-  if (this.tilesets.length > 0) {
-        const mainTileset = this.tilesets[0];
-        
-        // 把所有模型添加到场景中
-        this.tilesets.forEach(ts => this.viewer.scene.primitives.add(ts));
-        
-        await mainTileset.readyPromise;
-
-        // --- 计算位置校准矩阵 ---
-        const heightOffset = -40.2; // 如果模型整体高度不对，改这里（例如 -50）
-        const boundingSphere = mainTileset.boundingSphere;
-        const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center);
-        
-        const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0);
-        const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset);
-        const translation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3());
-        const modelMatrix = Cesium.Matrix4.fromTranslation(translation);
-
-        // [关键] 统一应用同一个矩阵，防止错位
-        this.tilesets.forEach(ts => {
-          ts.modelMatrix = modelMatrix;
-        });
-
-      }
+          await this.loadSiteModelTilesets(Cesium)
+          const focused = await this.focusOnModel()
+          if (!focused) {
+            this.setFallbackCameraView(Cesium)
+          }
         } catch (tilesetError) {
           console.error('加载3D Tiles模型失败:', tilesetError)
+          this.setFallbackCameraView(Cesium)
         }
       } catch (err) {
         this.error = '初始化Cesium失败: ' + err.message
@@ -1201,21 +1230,39 @@ export default {
         }
       });
     },
-    focusOnModel() {
-      // 检查数组是否有内容
-      if (this.viewer && this.tilesets && this.tilesets.length > 0) {
-        const Cesium = this.cesiumLib || window.Cesium;
-        if (!Cesium) return;
-        
-        const mainTileset = this.tilesets[0];
-        // 防止模型没加载完报错
-        if (!mainTileset || !mainTileset.boundingSphere) return;
+    async focusOnModel() {
+      if (!this.viewer || !this.tilesets || this.tilesets.length === 0) return false
 
-        const range = mainTileset.boundingSphere.radius * 2.5;
-        
-        this.viewer.flyTo(mainTileset, {
+      const Cesium = this.cesiumLib || window.Cesium
+      if (!Cesium) return false
+
+      const mainTileset = this.tilesets[0]
+      if (!mainTileset) return false
+
+      try {
+        if (mainTileset.readyPromise) {
+          await mainTileset.readyPromise
+        }
+      } catch (err) {
+        console.warn('等待模型就绪失败', err)
+        return false
+      }
+
+      if (!mainTileset.boundingSphere) return false
+
+      const range = Math.max(mainTileset.boundingSphere.radius * 2.5, 500)
+
+      try {
+        this.viewer.scene.requestRender()
+        await this.waitForNextFrame()
+        await this.viewer.flyTo(mainTileset, {
+          duration: 1.2,
           offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), range)
-        }).catch(err => console.warn('飞到模型失败', err));
+        })
+        return true
+      } catch (err) {
+        console.warn('飞到模型失败', err)
+        return false
       }
     },
 
@@ -2660,11 +2707,11 @@ extractPositionData(position) {
       }
     },
     async setupImageryLayers(Cesium) {
-      if (!this.viewer) return;
-      const layers = this.viewer.imageryLayers;
-      layers.removeAll();
-      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}';
-      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0);
+      if (!this.viewer) return
+      const layers = this.viewer.imageryLayers
+      layers.removeAll()
+      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}'
+      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0)
       try {
         const layer = new Cesium.UrlTemplateImageryProvider({
           url: localTilesUrl,
@@ -2672,13 +2719,10 @@ extractPositionData(position) {
           rectangle: extent,
           minimumLevel: 0,
           maximumLevel: 19
-        });
-        layers.addImageryProvider(layer);
-        setTimeout(() => {
-          this.viewer.camera.flyTo({ destination: extent });
-        }, 1000);
+        })
+        layers.addImageryProvider(layer)
       } catch (e) {
-        console.warn('地图加载失败', e);
+        console.warn('地图加载失败', e)
       }
     },
     // async setupImageryLayers(Cesium) {

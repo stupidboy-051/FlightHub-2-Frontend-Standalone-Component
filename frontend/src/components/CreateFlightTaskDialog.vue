@@ -203,8 +203,8 @@ export default {
         sn: '',
         wayline_uuid: '',
         time_zone: 'Asia/Chongqing',
-        rth_altitude: 100,
-        rth_mode: 'optimal',
+        rth_altitude: 70,
+        rth_mode: 'preset',
         wayline_precision_type: 'rtk',
         resumable_status: 'manual',
         task_type: 'immediate',
@@ -374,7 +374,7 @@ export default {
       this.form.name = ''
       this.form.wayline_uuid = ''
       this.form.rth_altitude = 100
-      this.form.rth_mode = 'optimal'
+      this.form.rth_mode = 'preset'
       this.form.wayline_precision_type = 'rtk'
       this.form.resumable_status = 'manual'
       this.form.task_type = 'immediate'
