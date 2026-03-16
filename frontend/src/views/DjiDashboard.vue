@@ -1061,8 +1061,15 @@ export default {
           // 假设：X轴是正前方，Y轴是右侧，Z轴是上方
           // 我们要放在：后方 (-X) 且 上方 (+Z)
           // 注意：不同模型的坐标系可能不同。如果发现相机在侧面，请调整这里的 x/y 值
-          const offset = new Cesium.Cartesian3(-distance, 0, height);
-
+// B. 定义相机在【局部坐标系】中的位置
+          // 💡 魔法抵消：为了不让相机跟着歪，这里要反向补偿！
+          // 如果下面模型补偿了 -45 度，这里就填正的 45。如果不准，可以试试 135 或 -135。
+          const cameraFixAngle = Cesium.Math.toRadians(-20); 
+          
+          const offsetX = -distance * Math.cos(cameraFixAngle);
+          const offsetY = -distance * Math.sin(cameraFixAngle);
+          
+          const offset = new Cesium.Cartesian3(offsetX, offsetY, height);
           // C. 将局部偏移量转换为世界坐标
           const cameraPosition = Cesium.Matrix4.multiplyByPoint(
               transform,
@@ -1906,7 +1913,12 @@ export default {
       const heading = Number.isFinite(resolvedHeading) ? resolvedHeading : 0
       const pitch = Number.isFinite(payload.pitch) ? payload.pitch : 0
       const roll = Number.isFinite(payload.roll) ? payload.roll : 0
-      const modelHeadingOffset = Cesium.Math.toRadians(-90)
+      
+      // 💡 模型姿态补偿：把歪掉的机头掰正
+      // 刚才推测是偏了 45 度，所以这里减去 45。
+      // 注意：这里的数字要和上面相机的数字【符号相反】！
+      const modelHeadingOffset = Cesium.Math.toRadians(20); 
+
       const orientation = Cesium.Transforms.headingPitchRollQuaternion(
         cartesian,
         new Cesium.HeadingPitchRoll(heading + modelHeadingOffset, pitch, roll)
