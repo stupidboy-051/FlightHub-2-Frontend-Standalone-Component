@@ -724,16 +724,37 @@ export default {
         }
       })
     },
-    async loadSiteModelTilesets(Cesium) {
+async loadSiteModelTilesets(Cesium) {
       if (!this.viewer) return []
 
       const modelUrls = this.getSiteModelUrls()
       const loadPromises = modelUrls.map(async url => {
         try {
           return await Cesium.Cesium3DTileset.fromUrl(url, {
-            maximumScreenSpaceError: 16,
+            // ---------------- 性能优化参数开始 ----------------
+            
+            // 1. 调大屏幕空间误差 (SSE)
+            // 默认值是 16。调大这个值（如 32 或 48），Cesium 会更倾向于渲染低层级（较模糊）的瓦片，从而大幅减少 Draw Calls 和渲染压力。
+            // 如果你觉得 32 还是卡，可以改为 48 或 64；如果觉得太模糊，可以改回 24。
+            maximumScreenSpaceError: 32, 
+            
+            // 2. 提高最大内存使用量 (单位 MB)
+            // 默认值是 512。因为你现在有 3 个模型，内存很容易爆满导致频繁触发垃圾回收（掉帧）。
+            // 提高到 1024 或 2048，可以允许显存缓存更多瓦片，减少重复加载的卡顿。
+            maximumMemoryUsage: 4096,    
+            
+            // 3. 开启动态屏幕空间误差
+            // 开启后，当相机快速移动或者视距较远时，会自动降低模型精度，防止拖拽视角时卡死。
+            dynamicScreenSpaceError: true, 
+            dynamicScreenSpaceErrorDensity: 0.00278,
+            dynamicScreenSpaceErrorFactor: 4.0,
+            dynamicScreenSpaceErrorHeightFalloff: 0.25,
+            
+            // 4. 原有的优化参数保持不变
             skipLevelOfDetail: true,
             cullWithChildrenBounds: true
+            
+            // ---------------- 性能优化参数结束 ----------------
           })
         } catch (error) {
           throw new Error(`模型加载失败: ${url}，${error.message}`)
@@ -1934,7 +1955,7 @@ export default {
             uri: './models/fly2.glb',
             minimumPixelSize: 128,
             maximumScale: 2000,
-            scale: 0.5,
+            scale: 0.3,
             runAnimations: true
           }
         })
