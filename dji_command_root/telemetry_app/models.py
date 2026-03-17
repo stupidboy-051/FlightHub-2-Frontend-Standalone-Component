@@ -133,6 +133,7 @@ class Alarm(models.Model):
     content = models.TextField(verbose_name="告警通用描述")
     image_url = models.URLField(max_length=500, blank=True, null=True, verbose_name="告警图片链接")
     specific_data = models.JSONField(blank=True, null=True, verbose_name="特定详情(算法结果)")
+    findings_data = models.JSONField(blank=True, null=True, verbose_name="算法findings原始数据")
     source_image = models.OneToOneField(
         "InspectImage",  # 注意引用 InspectImage 类
         on_delete=models.CASCADE,

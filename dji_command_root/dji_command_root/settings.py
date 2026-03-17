@@ -166,6 +166,8 @@ DETECT_HTTP_TIMEOUT = int(os.getenv("DETECT_HTTP_TIMEOUT", "180"))
 
 _ENABLE_VIDEO_SCAN_ENV = os.getenv("ENABLE_VIDEO_SCAN", "0").lower()
 ENABLE_VIDEO_SCAN = _ENABLE_VIDEO_SCAN_ENV in ("1", "true", "yes", "on")
+UUID_MISS_MAX_RETRIES = int(os.getenv("UUID_MISS_MAX_RETRIES", "5"))
+UUID_MISS_CACHE_TTL = int(os.getenv("UUID_MISS_CACHE_TTL", "86400"))
 
 REDIS_URL = os.getenv("REDIS_URL")
 if REDIS_URL:
@@ -182,9 +184,9 @@ if REDIS_URL:
 # =========================================================
 # DJI 司空 API 配置 (硬编码版)
 # =========================================================
-DJI_API_BASE_URL = "http://192.168.10.2:30812"  # 你的司空平台内网地址
-DJI_X_USER_TOKEN = "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiIiwiZXhwIjoyMDgyMzQxNjQzLCJuYmYiOjE3NjY4MDg4NDMsIm9yZ2FuaXphdGlvbl91dWlkIjoiZmJjNGJkY2YtMmFjMC00MmI2LTliMWItZTFkMWUyMDE0NjgyIiwicHJvamVjdF91dWlkIjoiIiwic3ViIjoiZmgyIiwidXNlcl9pZCI6IjE3NjY4MDgyNjMxNjYwODAxNjcifQ.Szehmvkjcmub5csnJQj1r0KjhdXCtkzCSzi31GDjigRn3B7V7TYVqDJ1QJ9-BxkvAl2eSoY3JXaH34ccHW-eaA" # 你的长Token
-DJI_X_PROJECT_UUID = "d41dc59e-cab1-4798-8f91-faca84ff4cb7"  # 你的项目ID
+DJI_API_BASE_URL = "http://192.168.10.20:30812"  # 你的司空平台内网地址
+DJI_X_USER_TOKEN = "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiYWRtaW4iLCJleHAiOjIwODkzNDYyNTcsIm5iZiI6MTc3MzcyNzA1Nywib3JnYW5pemF0aW9uX3V1aWQiOiJiNTlmMTc2Yi0wNjIyLTRkNWEtYWI2Yi04NmE4MTFmNGRiNTkiLCJwcm9qZWN0X3V1aWQiOiIiLCJzdWIiOiJmaDIiLCJ1c2VyX2lkIjoiMTc1ODUxMzQyNDYxOTI4MzY1OCJ9.wjqekGCLHXQGAyfTODH-VTH5nF3-qKHb6rwQN80xRK0mAt_qZ9_dThxgL9mhty9DJO2DHKF7f_h7xeuIRo1o5g" # 你的长Token
+DJI_X_PROJECT_UUID = "7b21e3a8-33c8-46cb-b80e-b3ddc53ce644"  # 你的项目ID
 DJI_X_Request_ID = "12345678"   # 任意唯一标识
 DJI_X_LANGUAGE = "zh"
 
@@ -195,7 +197,7 @@ DJI_X_LANGUAGE = "zh"
 # 1. SN -> 流ID 映射 (用于 ZLM 流查找)
 # 格式: "无人机SN": "ZLM流ID"
 DOCK_STREAM_MAPPING = {
-    "1581F8HGX255D00A0DK8": "drone07",   # 工业大学机场-无人机
+    "1581F8HGX255D00A0DK8": "drone01",   # 工业大学机场-无人机
     "8UUXN4900A052C": "dock01",          # 工业大学机场-监控
     "8UUXN4900A052D": "dock02",          # 示例: 其他机场
 }

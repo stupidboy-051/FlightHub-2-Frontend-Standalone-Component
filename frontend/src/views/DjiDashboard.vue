@@ -471,6 +471,7 @@ export default {
       fh2CheckTimer: null,
       componentConfig: null,
       zlmServerUrl: 'http://192.168.10.10',
+      droneTranscodedUrl: 'http://192.168.10.10/live/drone_fixed.live.mp4',
       liveStreamType: 'airport',
       showCreateTaskDialog: false,
       commandLoading: {
@@ -535,7 +536,7 @@ export default {
       return this.selectedDock?.drone_push || ''
     },
     currentLiveStreamUrl() {
-      return this.liveStreamType === 'drone' ? this.dronePushUrl : this.airportPushUrl
+      return this.liveStreamType === 'drone' ? this.droneTranscodedUrl : this.airportPushUrl
     },
     currentLiveStreamName() {
       return this.liveStreamType === 'drone' ? '无人机直播' : '机场直播'

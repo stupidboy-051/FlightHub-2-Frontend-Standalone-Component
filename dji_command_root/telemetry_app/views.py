@@ -425,38 +425,27 @@ def sync_images_core1(task):
 
 def create_alarm_from_detection(task, img, result_data):
     try:
-        # 1. 解析病害描述 (列表 -> 字符串)
-        # 算法返回: "defects_description": ["绝缘子破损", "螺母松动"]
         defects_list = result_data.get("defects_description", [])
-
-        # 将列表转为字符串: "绝缘子破损, 螺母松动"
         if defects_list:
             content_text = ", ".join([str(d) for d in defects_list])
-            # 取第一个作为 code 去匹配数据库分类 (用于统计)
             primary_code = defects_list[0]
         else:
             content_text = "AI检测发现异常(未说明类型)"
             primary_code = "UNKNOWN"
 
-        # 2. 匹配分类 (数据库 Category 外键)
-        # 虽然 Content 直接写了描述，但 category_id 还是需要关联的，方便以后筛选
         sub_category = AlarmCategory.objects.filter(code=primary_code).first()
         if not sub_category:
             sub_category = task.detect_category
 
-        # 3. 提取 GPS (硬性要求)
         gps = result_data.get("gps") or {}
-        lat = gps.get("lat", 0)  # 如果没 GPS，默认经纬度 0
+        lat = gps.get("lat", 0)
         lon = gps.get("lon", 0)
-        high = gps.get("high")  # 提取高度信息（可能为空）
+        high = gps.get("high")
 
-        # 🔥 尝试关联 FlightTaskInfo (方便统计)
         flight_task_obj = None
         if getattr(task, 'dji_task_uuid', None):
             flight_task_obj = FlightTaskInfo.objects.filter(task_uuid=task.dji_task_uuid).first()
 
-        # 4. 创建告警（避免重复创建）
-        # 🔥 使用循环 + try-except 捕获并发竞态条件和数据库锁
         import time
         from django.db.utils import OperationalError
 
@@ -470,6 +459,7 @@ def create_alarm_from_detection(task, img, result_data):
                         'category': sub_category,
                         'image_url': result_data.get("result_object_key") or img.object_key,
                         'specific_data': result_data,
+                        'findings_data': result_data.get("findings"),
                         'content': f"AI检测发现: {content_text}",
                         'latitude': lat,
                         'longitude': lon,
@@ -483,16 +473,12 @@ def create_alarm_from_detection(task, img, result_data):
                     print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
                 else:
                     print(f"ℹ️ [Alarm] 告警已存在 (ID: {alarm.id})，跳过创建。图片ID: {img.id}")
-                
-                # 成功则退出循环
                 break
 
             except OperationalError as e:
-                # 处理数据库锁定
                 if "locked" in str(e):
                     if attempt < 4:
                         sleep_time = 0.5 * (attempt + 1)
-                        # print(f"⏳ [Alarm] DB Locked, retrying in {sleep_time}s...")
                         time.sleep(sleep_time)
                         continue
                 print(f"❌ [Alarm] DB Error: {e}")
@@ -500,12 +486,10 @@ def create_alarm_from_detection(task, img, result_data):
                     raise
 
             except Exception as alarm_error:
-                # 🔥 如果是唯一性约束错误，说明其他线程已经创建了告警，忽略即可
                 if "UNIQUE constraint" in str(alarm_error) or "unique constraint" in str(alarm_error).lower():
                     print(f"ℹ️ [Alarm] 告警已存在（并发创建），跳过。图片ID: {img.id}")
                     break
                 else:
-                    # 其他类型的错误，抛出异常
                     raise
 
     except Exception as e:
@@ -1612,12 +1596,15 @@ def minio_poller_worker2():
 
     s3 = get_minio_client()
     bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+    uuid_miss_max_retries = int(getattr(settings, "UUID_MISS_MAX_RETRIES", 5))
+    uuid_miss_cache_ttl = int(getattr(settings, "UUID_MISS_CACHE_TTL", 86400))
     
     # 🔴 关键配置：静默超时时间（分钟）
     # 设为 60 分钟，覆盖无人机换电时间（通常30-40分钟）
     SILENCE_TIMEOUT_MINUTES = 60 
 
     from django.db import close_old_connections
+    from django.core.cache import cache
 
     while True:
         # 修复长时间运行导致的数据库连接丢失问题
@@ -1697,6 +1684,10 @@ def minio_poller_worker2():
                 video_keys = entry['video_keys']
                 
                 folder_uuid = folder_prefix.strip('/').split('/')[-1]
+                miss_count_key = f"poller:uuid_miss_count:{folder_uuid}"
+                miss_stop_key = f"poller:uuid_miss_stop:{folder_uuid}"
+                if cache.get(miss_stop_key):
+                    continue
                 
                 # 尝试获取已存在的任务
                 # 🔥 修正：优先获取子任务（实际执行检测的任务），排除父任务容器
@@ -1728,6 +1719,7 @@ def minio_poller_worker2():
                     fingerprint = None
 
                     if is_video_task:
+                        cache.delete_many([miss_count_key, miss_stop_key])
                         print(f"🎥 [Video] 识别为视频任务: {sample_key} -> 自动归类为保护区")
                     else:
                         candidate_keys = entry.get('sample_candidates') or ([sample_key] if sample_key else [])
@@ -1735,9 +1727,16 @@ def minio_poller_worker2():
                             uuid = get_image_action_uuid_from_minio(s3, bucket_name, candidate_key)
                             if uuid:
                                 sample_key = candidate_key
+                                cache.delete_many([miss_count_key, miss_stop_key])
                                 break
                         if not uuid:
-                            print(f"⚠️ [Skip] 无法从 {sample_key or folder_prefix} 提取 UUID")
+                            miss_count = int(cache.get(miss_count_key, 0)) + 1
+                            cache.set(miss_count_key, miss_count, timeout=uuid_miss_cache_ttl)
+                            if miss_count >= uuid_miss_max_retries:
+                                cache.set(miss_stop_key, 1, timeout=uuid_miss_cache_ttl)
+                                print(f"⏹️ [Stop Scan] 文件夹 {folder_uuid} 连续 {miss_count} 次无法提取 UUID，停止重复扫描")
+                            else:
+                                print(f"⚠️ [Skip] 无法从 {sample_key or folder_prefix} 提取 UUID ({miss_count}/{uuid_miss_max_retries})")
                             continue
 
                     # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
@@ -1924,6 +1923,7 @@ def minio_poller_worker2():
                 # B. 如果任务已存在 -> 准备检查增量
                 else:
                     target_task = existing_task
+                    cache.delete_many([miss_count_key, miss_stop_key])
                     
                     # 🔥 [自动修复] 检查视频任务的切片情况（支持多视频）
                     if video_keys:
@@ -4154,7 +4154,7 @@ class WaylineFingerprintManager:
     @staticmethod
     def get_api_headers_and_host():
         """从 Settings 获取配置"""
-        base_url = getattr(settings, "DJI_API_BASE_URL", "http://192.168.10.2").rstrip('/')
+        base_url = getattr(settings, "DJI_API_BASE_URL", "http://192.168.10.20").rstrip('/')
         
         # 动态生成 X-Request-Id (如果 Settings 里没配，或者需要每次唯一)
         # 通常 X-Request-Id 应该是唯一的，这里我们优先用 Settings 里的前缀+UUID，或者直接 UUID
@@ -4245,25 +4245,24 @@ class WaylineFingerprintManager:
 
                 # 如果数据库没有匹配到，则尝试关键词匹配
                 if not matched_category:
-                    for cat in categories:
-                     norm_code = normalize_detect_code(cat.code)
                     keyword_map = {
                         "rail": ["rail", "铁路", "轨道"],
                         "contactline": ["contactline", "接触网", "catenary", "overhead"],
                         "bridge": ["bridge", "桥梁"],
                         "protected_area": ["protected_area", "保护区"],
                     }
-                    tokens = []
-                    if cat.match_keyword:
-                        tokens.append(cat.match_keyword)
-                    tokens.extend(keyword_map.get(norm_code, []))
-
-                    for token in tokens:
-                        if token and token.lower() in w_name_lower:
-                            matched_category = cat
+                    for cat in categories:
+                        norm_code = normalize_detect_code(cat.code)
+                        tokens = []
+                        if cat.match_keyword:
+                            tokens.append(str(cat.match_keyword).strip())
+                        tokens.extend(keyword_map.get(norm_code, []))
+                        for token in tokens:
+                            if token and token.lower() in w_name_lower:
+                                matched_category = cat
+                                break
+                        if matched_category:
                             break
-                    if matched_category:
-                        break
 
                 # 只有匹配成功的才处理
                 if matched_category:

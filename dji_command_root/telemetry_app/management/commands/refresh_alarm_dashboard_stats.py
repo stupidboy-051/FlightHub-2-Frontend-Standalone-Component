@@ -35,4 +35,3 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(f"完成刷新，共更新 {len(results)} 条记录")
         )
-

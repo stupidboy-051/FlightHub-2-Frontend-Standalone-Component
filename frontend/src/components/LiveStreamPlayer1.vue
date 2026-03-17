@@ -111,7 +111,6 @@
 
 <script>
 import liveMonitorApi from '../api/liveMonitorApi'
-import mpegts from 'mpegts.js' // 🔥 引入 mpegts
 
 export default {
   name: 'LiveStreamPlayer',
@@ -144,31 +143,34 @@ export default {
   data() {
     return {
       isPlaying: false,
-      isMuted: true, // 🔥 建议默认静音，避免 Chrome 自动播放拦截
+      isMuted: false,
       loading: false,
       hasError: false,
       errorMessage: '',
+      // 🔥 修复：初始状态为 false，不从 localStorage 恢复
+      // 按钮状态完全由用户操作控制
       isMonitoring: false,
       monitorLoading: false,
       monitorCheckTimer: null,
+      // 🔥 新增：流状态检查
       isStreamOnline: null,  // null=未检查, true=在线, false=离线
       checkingStream: false,
+      // 🔥 新增：卡死检测
       lastTimeUpdate: 0,
       stuckWatchdogTimer: null,
       stuckCount: 0,
       _reloadTimer: null,
       _isUnmounted: false,
-      flvPlayer: null // 🔥 新增 mpegts 播放器实例
+      _lastChaseAt: 0
     }
   },
   computed: {
-    // 🔥 代理地址并转换为 FLV 格式
+    // 🔥 使用代理路径访问 ZLM，避免跨域问题
     streamUrl() {
-      const normalizeToFlv = (url) => {
+      const normalizeToMp4 = (url) => {
         if (!url) return url
-        // 保留 mp4 直连播放，不再强制转换为 flv
-        if (url.endsWith('.mp4')) {
-          return url
+        if (url.endsWith('.live.flv')) {
+          return url.replace('.live.flv', '.live.mp4')
         }
         return url
       }
@@ -176,49 +178,62 @@ export default {
       // 如果传入了 Override URL，进行智能处理
       if (this.streamUrlOverride) {
         const url = this.streamUrlOverride
-
-        // 智能转换 RTMP 地址为 HTTP-FLV
+        
+        // 🔥 智能转换 RTMP 地址为 HTTP-MP4
         if (url.startsWith('rtmp://')) {
-          console.warn('检测到 RTMP 地址，尝试转换为 HTTP-FLV 播放地址:', url)
+          console.warn('检测到 RTMP 地址，尝试转换为 HTTP-MP4 播放地址:', url)
           try {
+            // 解析 rtmp://host:port/app/streamId
             const urlObj = new URL(url)
             const pathParts = urlObj.pathname.split('/').filter(p => p)
+            // 通常 pathParts 是 ['live', 'dock01']
             if (pathParts.length >= 2) {
               const app = pathParts[0]
               const stream = pathParts[1]
-
+              
+              // 重新构建为 HTTP-MP4
               const isDev = process.env.NODE_ENV === 'development'
               if (isDev) {
-                return normalizeToFlv(`/zlm/${app}/${stream}.live.flv`)
+                return normalizeToMp4(`/zlm/${app}/${stream}.live.mp4`)
               } else {
-                return normalizeToFlv(`${this.zlmServer}/${app}/${stream}.live.flv`)
+                return normalizeToMp4(`${this.zlmServer}/${app}/${stream}.live.mp4`)
               }
             }
           } catch (e) {
             console.error('RTMP 地址解析失败:', e)
           }
         }
-        return normalizeToFlv(url)
+        
+        // 如果不是 RTMP 或解析失败，原样返回
+        return normalizeToMp4(url)
       }
 
       if (!this.streamId) return ''
 
+      // 🔥 开发环境使用代理，生产环境直接访问
+      // 开发环境: /zlm/live/dock01.live.mp4 -> http://192.168.10.10/live/dock01.live.mp4
+      // 生产环境: 直接使用 zlmServer 地址
       const isDev = process.env.NODE_ENV === 'development'
       if (isDev) {
-        return normalizeToFlv(`/zlm/live/${this.streamId}.live.flv`)
+        return normalizeToMp4(`/zlm/live/${this.streamId}.live.mp4`)
       } else {
-        return normalizeToFlv(`${this.zlmServer}/live/${this.streamId}.live.flv`)
+        return normalizeToMp4(`${this.zlmServer}/live/${this.streamId}.live.mp4`)
       }
     }
   },
   mounted() {
+    // 直接初始化原生播放器，不需要等待 flv.js
     this.initPlayer()
+
+    // 🔥 优先从服务器获取真实状态,然后同步到本地
     this.syncMonitorStatusFromServer()
 
+    // 定时检查监听状态
     this.monitorCheckTimer = setInterval(() => {
       this.checkMonitorStatus()
     }, 5000)
 
+    // 🔥 启动卡死检测看门狗 (每2秒检查一次)
     this.startStuckWatchdog()
   },
   beforeUnmount() {
@@ -234,6 +249,25 @@ export default {
     }
   },
   methods: {
+    chaseToLive() {
+      const video = this.$refs.videoElement
+      if (!video) return
+      if (!video.buffered || video.buffered.length === 0) return
+
+      const now = Date.now()
+      if (now - (this._lastChaseAt || 0) < 1000) return
+
+      const end = video.buffered.end(video.buffered.length - 1)
+      const lag = end - video.currentTime
+      if (!Number.isFinite(lag) || lag <= 1.5) return
+
+      const target = Math.max(0, end - 0.3)
+      if (Number.isFinite(target) && target > 0) {
+        try { video.currentTime = target } catch (e) { void e }
+        this._lastChaseAt = now
+      }
+    },
+
     // ========== 监听状态持久化方法 ==========
     getStorageKey() {
       return `monitor_status_${this.streamId}`
@@ -245,6 +279,7 @@ export default {
         const stored = localStorage.getItem(key)
         if (stored) {
           const data = JSON.parse(stored)
+          // 检查是否过期(超过1小时则认为已失效)
           const now = Date.now()
           if (data.timestamp && (now - data.timestamp) < 3600000) {
             console.log(`从本地恢复监听状态: ${data.isMonitoring}`)
@@ -282,7 +317,12 @@ export default {
       }
     },
 
-    // ========== 🔥 mpegts 播放器核心方法 ==========
+    // 动态加载 flv.js (已废弃，保留空函数防止报错)
+    loadFlvJs() {
+      console.log('FMP4 模式：无需加载 flv.js')
+    },
+
+    // 🔥【关键修改】原生 MP4 初始化逻辑
     initPlayer() {
       const video = this.$refs.videoElement
 
@@ -296,148 +336,70 @@ export default {
 
       this.destroyPlayer()
 
-      console.log('正在初始化 HTTP-FLV 播放:', this.streamUrl)
+      console.log('正在初始化 HTTP-MP4 播放:', this.streamUrl)
+
       this.loading = true
       this.hasError = false
       this.errorMessage = ''
 
-  // 在你的 initPlayer 方法中找到这段：
-    // 优先支持 MP4 直连播放（不走 mpegts）
-    const isMp4 = typeof this.streamUrl === 'string' && this.streamUrl.includes('.mp4')
-    if (isMp4) {
-      const videoEl = this.$refs.videoElement
-      try {
-        videoEl.muted = this.isMuted
-        videoEl.src = this.streamUrl
-        if (this.autoPlay) {
-          videoEl.play().then(() => {
-            this.isPlaying = true
-            this.loading = false
-          }).catch(err => {
-            console.warn('MP4 自动播放被阻止:', err)
-            this.isPlaying = false
-            this.loading = false
-          })
-        } else {
-          this.loading = false
-        }
-      } catch (e) {
-        this.hasError = true
-        this.errorMessage = 'MP4 播放初始化失败'
+      video.src = this.streamUrl
+      video.load()
+
+      if (!this.autoPlay) {
         this.loading = false
+        this.isPlaying = false
+        return
       }
-      return
-    }
 
-    if (mpegts.getFeatureList().mseLivePlayback) {
-      this.flvPlayer = mpegts.createPlayer({
-        type: 'flv',
-        isLive: true,
-        url: this.streamUrl,
-        // 🛑 修改这里：不要用 !this.isMuted，直接写死 false
-        // 强制 mpegts 在解包时丢弃所有音频轨，防止干扰视频解码
-        hasAudio: false,
-        hasVideo: true   // 明确告诉它我们要视频
-      }, {
-        enableWorker: true,
-        enableStashBuffer: false,
-        stashInitialSize: 128,
-        liveBufferLatencyChasing: true,
-        liveBufferLatencyMaxLatency: 2.0,
-        liveBufferLatencyMinLatency: 0.5,
-        // 🔥 新增这个配置：对不规范的 H.264 更加宽容
-        fixAudioTimestampGap: false
-      })
-
-        this.flvPlayer.attachMediaElement(video)
-        this.flvPlayer.load()
-
-        // 监听底层错误
-        this.flvPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail) => {
-          console.error(`❌ mpegts解码错误: type=${errorType}, detail=${errorDetail}`)
-          if (!this.hasError) {
-            this.hasError = true
-            this.errorMessage = `解码异常: ${errorDetail}`
-            this.loading = false
-            this.isPlaying = false
-          }
+      const playRet = video.play()
+      if (playRet && typeof playRet.then === 'function') {
+        playRet.catch(err => {
+          console.warn('自动播放被阻止，可能需要用户交互:', err)
+          this.isPlaying = false
+          this.loading = false
         })
-
-        if (this.autoPlay) {
-          this.flvPlayer.play().then(() => {
-            this.isPlaying = true
-          }).catch(err => {
-            console.warn('自动播放被阻止，可能需要用户交互:', err)
-            this.isPlaying = false
-            this.loading = false
-          })
-        }
-      } else {
-        this.hasError = true
-        this.errorMessage = '当前浏览器不支持 MSE 硬件加速，无法播放'
-        this.loading = false
       }
     },
 
+    // 销毁播放器
     destroyPlayer() {
-      if (this.flvPlayer) {
-        try {
-          this.flvPlayer.pause()
-          this.flvPlayer.unload()
-          this.flvPlayer.detachMediaElement()
-          this.flvPlayer.destroy()
-        } catch (e) {
-          console.warn('销毁播放器异常:', e)
-        }
-        this.flvPlayer = null
-      }
-
       const video = this.$refs.videoElement
+
       if (video) {
         try { video.pause() } catch (e) { console.warn(e) }
         video.removeAttribute('src')
         video.load()
       }
+
       this.isPlaying = false
     },
 
+    // 切换播放/暂停
     togglePlay() {
+      const video = this.$refs.videoElement
+
+      if (!video) return
+
       if (this.isPlaying) {
-        if (this.flvPlayer) {
-          this.flvPlayer.pause()
-        } else if (this.$refs.videoElement) {
-          try { this.$refs.videoElement.pause() } catch (e) { console.warn(e) }
-        }
+        video.pause()
         this.isPlaying = false
       } else {
         this.loading = true
-        if (this.flvPlayer) {
-          this.flvPlayer.play().then(() => {
+        const ret = video.play()
+        if (ret && typeof ret.then === 'function') {
+          ret.then(() => {
             this.loading = false
-            this.isPlaying = true
           }).catch(err => {
             console.error('播放失败:', err)
             this.loading = false
           })
         } else {
-           // 原生视频播放
-           const video = this.$refs.videoElement
-           if (video) {
-             video.play().then(() => {
-               this.loading = false
-               this.isPlaying = true
-             }).catch(err => {
-               console.error('原生播放失败:', err)
-               this.loading = false
-               this.isPlaying = false
-             })
-           } else {
-             this.loading = false
-           }
+          this.loading = false
         }
       }
     },
 
+    // 切换静音
     toggleMute() {
       this.isMuted = !this.isMuted
       if (this.$refs.videoElement) {
@@ -445,6 +407,7 @@ export default {
       }
     },
 
+    // 重新加载
     reload() {
       if (this._isUnmounted) return
       if (this._reloadTimer) return
@@ -455,7 +418,7 @@ export default {
       this._reloadTimer = setTimeout(() => {
         this._reloadTimer = null
         this.initPlayer()
-      }, 500)
+      }, 300)
     },
 
     // 视频事件处理
@@ -463,50 +426,102 @@ export default {
       this.loading = true
       console.log('开始加载流...')
     },
+
     onCanPlay() {
       this.loading = false
       console.log('流加载完成，可以播放')
     },
+
     onPlaying() {
       this.loading = false
       this.isPlaying = true
       this.hasError = false
       console.log('正在播放')
     },
-    onError() {
-      // 原生播放错误处理（mpegts 错误由其事件接管）
-      if (!this.flvPlayer) {
-        this.hasError = true
-        this.errorMessage = '视频播放错误'
-        this.loading = false
-        this.isPlaying = false
+
+    onError(e) {
+      console.error('❌ 视频元素错误:', e)
+
+      const video = this.$refs.videoElement
+      if (video && video.error) {
+        const errorCode = video.error.code
+        const errorMsg = video.error.message
+
+        console.error('错误代码:', errorCode)
+        console.error('错误信息:', errorMsg)
+
+        // 🔥 详细的错误诊断
+        let errorDetail = ''
+        switch (errorCode) {
+          case 1: // MEDIA_ERR_ABORTED
+            errorDetail = '用户中止'
+            break
+          case 2: // MEDIA_ERR_NETWORK
+            errorDetail = '网络错误 - 请检查流是否正在推流'
+            break
+          case 3: // MEDIA_ERR_DECODE
+            errorDetail = '视频解码错误 - 可能是编码格式不支持（H.265等）'
+            break
+          case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+            errorDetail = '视频格式不支持 - 请检查推流编码格式'
+            break
+          default:
+            errorDetail = `未知错误 (${errorCode})`
+        }
+
+        console.error('错误详情:', errorDetail)
+
+        // 忽略手动切换 src 时的 abort 错误
+        if (errorCode === 20) {
+          return
+        }
+
+        if (!this.hasError) {
+          this.hasError = true
+          this.errorMessage = `播放失败: ${errorDetail}`
+        }
       }
-    },
-    onWaiting() {
-      console.log('缓冲中...')
-    },
-    onTimeUpdate() {
-      this.lastTimeUpdate = Date.now()
+
+      this.loading = false
+      this.isPlaying = false
     },
 
-    // 卡死检测看门狗
+    onWaiting() {
+      console.log('缓冲中...')
+      this.chaseToLive()
+    },
+
+    // 🔥 新增：FMP4 追帧逻辑，降低延迟
+    onTimeUpdate() {
+      const video = this.$refs.videoElement
+      if (!video) return
+
+      // 更新最后活动时间，用于看门狗检测
+      this.lastTimeUpdate = Date.now()
+      this.chaseToLive()
+    },
+
+    // 🔥 新增：卡死检测看门狗
     startStuckWatchdog() {
       this.stopStuckWatchdog()
       this.lastTimeUpdate = Date.now()
-
+      
       this.stuckWatchdogTimer = setInterval(() => {
+        // 如果没有在播放或正在加载，不检测
         if (!this.isPlaying || this.loading || this.hasError) return
 
         const now = Date.now()
+        // 如果超过 4秒 没有 timeupdate 事件，认为画面卡死
         if (now - this.lastTimeUpdate > 4000) {
           this.stuckCount++
           console.warn(`⚠️ 画面疑似卡死 (${this.stuckCount}次)，上次更新: ${(now - this.lastTimeUpdate)/1000}s 前`)
-
+          
+          // 如果连续卡死检测触发，尝试重载
           if (this.stuckCount >= 1) {
              console.log('🔄 触发防卡死重连机制...')
              this.reload()
              this.stuckCount = 0
-             this.lastTimeUpdate = Date.now()
+             this.lastTimeUpdate = Date.now() // 重置计时
           }
         } else {
           this.stuckCount = 0
@@ -521,7 +536,10 @@ export default {
       }
     },
 
-    // ========== 监听控制与其他业务方法 ==========
+    // ======================================================================
+    // 监听控制方法 (保持不变)
+    // ======================================================================
+
     async toggleMonitor() {
       if (this.monitorLoading) return
 
@@ -538,6 +556,7 @@ export default {
         const response = await liveMonitorApi.startMonitor(this.streamId, 3.0)
         console.log('✅ 监听已启动:', response)
 
+        // 🔥 修复：直接设置状态为 true，不依赖服务器同步
         this.isMonitoring = true
         this.setStoredMonitorStatus(true)
 
@@ -546,6 +565,7 @@ export default {
         console.error('❌ 启动监听失败:', err)
         const errorMsg = err.response?.data?.message || err.message || '启动失败'
         alert(`启动保护区检测失败: ${errorMsg}`)
+        // 失败时保持当前状态不变
       } finally {
         this.monitorLoading = false
       }
@@ -557,6 +577,7 @@ export default {
         const response = await liveMonitorApi.stopMonitor(this.streamId)
         console.log('✅ 监听已停止:', response)
 
+        // 🔥 修复：直接设置状态为 false，不依赖服务器同步
         this.isMonitoring = false
         this.clearStoredMonitorStatus()
 
@@ -565,6 +586,7 @@ export default {
         console.error('❌ 停止监听失败:', err)
         const errorMsg = err.response?.data?.message || err.message || '停止失败'
         alert(`停止保护区检测失败: ${errorMsg}`)
+        // 即使失败也设置为 false（用户意图是停止）
         this.isMonitoring = false
         this.clearStoredMonitorStatus()
       } finally {
@@ -577,9 +599,11 @@ export default {
         const status = await liveMonitorApi.getStatus(this.streamId)
         const serverIsRunning = status.is_running || false
 
+        // 🔥 如果服务器状态与本地不一致,以服务器为准
         if (serverIsRunning !== this.isMonitoring) {
           console.log(`状态不一致! 本地: ${this.isMonitoring}, 服务器: ${serverIsRunning}, 以服务器为准`)
           this.isMonitoring = serverIsRunning
+          // 同步到本地存储
           if (serverIsRunning) {
             this.setStoredMonitorStatus(true)
           } else {
@@ -587,28 +611,41 @@ export default {
           }
         }
       } catch (err) {
+        // 静默失败，不影响用户使用
         console.warn('检查监听状态失败:', err)
       }
     },
 
+    // 🔥 新增: 从服务器同步状态到本地
     async syncMonitorStatusFromServer() {
       try {
         const status = await liveMonitorApi.getStatus(this.streamId)
         const serverIsRunning = status.is_running || false
 
         console.log(`从服务器同步监听状态: ${serverIsRunning}`)
+
+        // 🔥 以服务器状态为准,覆盖本地状态
         this.isMonitoring = serverIsRunning
 
+        // 同步到本地存储
         if (serverIsRunning) {
           this.setStoredMonitorStatus(true)
         } else {
           this.clearStoredMonitorStatus()
         }
       } catch (err) {
+        // 如果服务器查询失败,使用本地缓存的状态
         console.warn('从服务器同步状态失败,使用本地缓存:', err)
+        // 此时 isMonitoring 已经在 data() 中从 localStorage 恢复了
       }
     },
 
+    // ========== 🔥 新增：流状态检查方法 ==========
+
+    /**
+     * 页面加载时检查一次后端状态
+     * 之后不再自动改变，完全由用户操作控制
+     */
     async checkBackendMonitorStatusOnce() {
       try {
         const status = await liveMonitorApi.getStatus(this.streamId)
@@ -616,6 +653,8 @@ export default {
 
         console.log(`🔍 [初始检查] 后端监听状态: ${serverIsRunning}`)
 
+        // 🔥 只在页面加载时同步一次真实状态
+        // 之后完全由用户操作控制，不再自动改变
         if (serverIsRunning) {
           this.isMonitoring = true
           this.setStoredMonitorStatus(true)
@@ -626,16 +665,22 @@ export default {
           console.log('✅ 后端未运行，前端状态设为：未检测')
         }
       } catch (err) {
+        // 检查失败时保持默认状态（false）
         console.warn('⚠️ 检查后端状态失败，使用默认状态（未检测）:', err)
         this.isMonitoring = false
       }
     },
 
+    /**
+     * 检查当前流是否在线
+     * 通过 ZLM API 查询流列表
+     */
     async checkStreamOnline() {
       if (!this.streamId) return
 
       this.checkingStream = true
       try {
+        // 调用 ZLM API 检查流是否在线
         const apiUrl = `${this.zlmServer}/index/api/isMediaOnline`
         const params = new URLSearchParams({
           secret: '123456',
@@ -645,25 +690,35 @@ export default {
         })
 
         console.log('🔍 检查流状态:', `${apiUrl}?${params}`)
+
         const response = await fetch(`${apiUrl}?${params}`)
+
+        console.log('📡 API 响应状态:', response.status)
+
         const result = await response.json()
+        console.log('📄 API 响应数据:', result)
 
         if (result.code === 0) {
+          // 🔥 ZLM 返回的数据可能是数字或布尔值
           const isOnline = result.data === 1 || result.data === true || result.data === '1'
           this.isStreamOnline = isOnline
           console.log(`✅ 流 ${this.streamId} 在线状态: ${this.isStreamOnline}`)
         } else {
           console.warn(`⚠️ ZLM API 返回错误: code=${result.code}, msg=${result.msg}`)
+          // 🔥 如果 API 失败，但视频能播放，我们认为是在线的
           if (this.isPlaying) {
             this.isStreamOnline = true
+            console.log('✅ API 检查失败，但视频正在播放，标记为在线')
           } else {
             this.isStreamOnline = false
           }
         }
       } catch (err) {
         console.error('❌ 检查流状态失败:', err)
+        // 🔥 如果网络错误，但视频能播放，我们认为是在线的
         if (this.isPlaying) {
           this.isStreamOnline = true
+          console.log('✅ 网络错误，但视频正在播放，标记为在线')
         } else {
           this.isStreamOnline = false
         }
@@ -672,6 +727,10 @@ export default {
       }
     },
 
+    /**
+     * 获取所有在线流列表
+     * 返回格式: [{ app: 'live', stream: 'dock01' }, ...]
+     */
     async getOnlineStreams() {
       try {
         const apiUrl = `${this.zlmServer}/index/api/getMediaList`
@@ -686,6 +745,7 @@ export default {
         if (result.code === 0) {
           const streams = result.data || []
           console.log(`📹 当前在线流数量: ${streams.length}`)
+          console.log('📋 在线流列表:', streams.map(s => `${s.app}/${s.stream}`).join(', '))
           return streams
         } else {
           console.warn(`⚠️ 获取流列表失败: ${result.msg}`)
@@ -701,7 +761,6 @@ export default {
 </script>
 
 <style scoped>
-/* 样式部分保持不变 */
 .live-stream-player {
   width: 100%;
   height: 100%;
@@ -713,6 +772,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.2);
 }
 
+/* 播放器头部 */
 .player-header {
   display: flex;
   justify-content: space-between;
@@ -820,6 +880,7 @@ export default {
   transform: translateY(-1px);
 }
 
+/* 监听控制按钮 */
 .monitor-control-btn {
   height: 32px;
   padding: 0 12px;
@@ -868,6 +929,7 @@ export default {
   animation: spin 0.6s linear infinite;
 }
 
+/* 播放器容器 */
 .player-container {
   flex: 1;
   position: relative;
@@ -884,6 +946,7 @@ export default {
   object-fit: contain;
 }
 
+/* 覆盖层 */
 .overlay {
   position: absolute;
   top: 0;
@@ -943,6 +1006,7 @@ export default {
   border-color: rgba(0, 212, 255, 0.5);
 }
 
+/* 播放器底部 */
 .player-footer {
   padding: 10px 16px;
   background: rgba(10, 14, 39, 0.8);

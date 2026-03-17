@@ -237,4 +237,3 @@ def refresh_alarm_dashboard_stats(range_days_list=None, metrics=None, now=None):
         for metric in metric_list:
             results.append(upsert_alarm_dashboard_stats(days, metric, now=now))
     return results
-
