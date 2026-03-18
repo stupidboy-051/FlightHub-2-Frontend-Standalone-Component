@@ -425,6 +425,57 @@ import flightTaskInfoApi from '../api/flightTaskInfoApi.js'
 import flightTaskApi from '../api/flightTaskApi.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const CESIUM_TARGET_FRAME_RATE = 30
+const CESIUM_MAX_RENDER_TIME_CHANGE = 1 / CESIUM_TARGET_FRAME_RATE
+const DRONE_POSITION_PAGE_SIZE = 2
+const DRONE_SAMPLE_RETENTION_SECONDS = 20
+const DRONE_SAMPLE_PRUNE_INTERVAL_MS = 2000
+
+let chaseScratchRotationMatrix = null
+let chaseScratchTransform = null
+let chaseScratchOffset = null
+let chaseScratchDynamicOffset = null
+let chaseScratchForwardOffset = null
+let chaseScratchCameraPosition = null
+let chaseScratchDirection = null
+let chaseScratchUp = null
+let chaseScratchForwardTarget = null
+let chaseScratchPosition = null
+let chaseScratchOrientation = null
+let droneTrackingRenderTime = null
+let droneTrackingPruneBefore = null
+let droneTrackingTrimInterval = null
+let droneTrackingHeadingPitchRoll = null
+let droneTrackingOrientationSample = null
+let droneTrackingHeadingTransform = null
+let droneTrackingHeadingInverseTransform = null
+let droneTrackingHeadingLocalPoint = null
+
+function ensureChaseCameraScratch(Cesium) {
+  if (!chaseScratchRotationMatrix) chaseScratchRotationMatrix = new Cesium.Matrix3()
+  if (!chaseScratchTransform) chaseScratchTransform = new Cesium.Matrix4()
+  if (!chaseScratchOffset) chaseScratchOffset = new Cesium.Cartesian3()
+  if (!chaseScratchDynamicOffset) chaseScratchDynamicOffset = new Cesium.Cartesian3()
+  if (!chaseScratchForwardOffset) chaseScratchForwardOffset = new Cesium.Cartesian3()
+  if (!chaseScratchCameraPosition) chaseScratchCameraPosition = new Cesium.Cartesian3()
+  if (!chaseScratchDirection) chaseScratchDirection = new Cesium.Cartesian3()
+  if (!chaseScratchUp) chaseScratchUp = new Cesium.Cartesian3()
+  if (!chaseScratchForwardTarget) chaseScratchForwardTarget = new Cesium.Cartesian3()
+  if (!chaseScratchPosition) chaseScratchPosition = new Cesium.Cartesian3()
+  if (!chaseScratchOrientation) chaseScratchOrientation = new Cesium.Quaternion()
+}
+
+function ensureDroneTrackingScratch(Cesium) {
+  if (!droneTrackingRenderTime) droneTrackingRenderTime = new Cesium.JulianDate()
+  if (!droneTrackingPruneBefore) droneTrackingPruneBefore = new Cesium.JulianDate()
+  if (!droneTrackingTrimInterval) droneTrackingTrimInterval = new Cesium.TimeInterval()
+  if (!droneTrackingHeadingPitchRoll) droneTrackingHeadingPitchRoll = new Cesium.HeadingPitchRoll()
+  if (!droneTrackingOrientationSample) droneTrackingOrientationSample = new Cesium.Quaternion()
+  if (!droneTrackingHeadingTransform) droneTrackingHeadingTransform = new Cesium.Matrix4()
+  if (!droneTrackingHeadingInverseTransform) droneTrackingHeadingInverseTransform = new Cesium.Matrix4()
+  if (!droneTrackingHeadingLocalPoint) droneTrackingHeadingLocalPoint = new Cesium.Cartesian3()
+}
+
 export default {
   name: 'DjiDashboard',
   components: {
@@ -623,6 +674,8 @@ export default {
     this.protectedAlarmIdSet = new Set()
     this.actionDetailEntities = []
     this.pickHandler = null
+    this.lastDroneSamplePruneTimestamp = null
+    this.latestPositionsCacheKey = ''
   },
   async mounted() {
     this.checkFh2Availability()
@@ -641,7 +694,7 @@ export default {
       this.fh2CheckTimer = null
     }
     if (this.viewer && this.chaseCameraListener) {
-      this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener)
+      this.viewer.scene.preUpdate.removeEventListener(this.chaseCameraListener)
     }
     if (this.viewer) {
       this.viewer.destroy()
@@ -742,7 +795,7 @@ async loadSiteModelTilesets(Cesium) {
             // 2. 提高最大内存使用量 (单位 MB)
             // 默认值是 512。因为你现在有 3 个模型，内存很容易爆满导致频繁触发垃圾回收（掉帧）。
             // 提高到 1024 或 2048，可以允许显存缓存更多瓦片，减少重复加载的卡顿。
-            maximumMemoryUsage: 4096,    
+            maximumMemoryUsage: 1024,    
             
             // 3. 开启动态屏幕空间误差
             // 开启后，当相机快速移动或者视距较远时，会自动降低模型精度，防止拖拽视角时卡死。
@@ -825,12 +878,19 @@ async loadSiteModelTilesets(Cesium) {
           selectionIndicator: false,
           timeline: false,
           navigationHelpButton: false,
-          creditContainer: document.createElement('div')
+          creditContainer: document.createElement('div'),
+          orderIndependentTranslucency: false,
+          requestRenderMode: true,
+          maximumRenderTimeChange: CESIUM_MAX_RENDER_TIME_CHANGE,
+          targetFrameRate: CESIUM_TARGET_FRAME_RATE,
+          msaaSamples: 1,
+          useBrowserRecommendedResolution: true
         })
 
         this.viewer.scene.globe.depthTestAgainstTerrain = false
         this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = false
         this.viewer.scene.globe.show = this.globeVisible
+        this.viewer.targetFrameRate = CESIUM_TARGET_FRAME_RATE
 
         await this.setupImageryLayers(Cesium)
         this.tuneCameraControls(this.viewer.scene.screenSpaceCameraController)
@@ -1022,17 +1082,18 @@ async loadSiteModelTilesets(Cesium) {
     // 安全的计算朝向函数，处理重合点
     calculateHeading(p1, p2) {
       const Cesium = this.cesiumLib || window.Cesium;
+      ensureDroneTrackingScratch(Cesium)
       // 如果点太近，直接返回 0，防止数学错误
       if (Cesium.Cartesian3.distance(p1, p2) < 1.0) {
         return 0;
       }
 
       // 建立局部坐标系 ENU (East-North-Up)
-      const transform = Cesium.Transforms.eastNorthUpToFixedFrame(p1);
-      const invTransform = Cesium.Matrix4.inverse(transform, new Cesium.Matrix4());
+      const transform = Cesium.Transforms.eastNorthUpToFixedFrame(p1, undefined, droneTrackingHeadingTransform);
+      const invTransform = Cesium.Matrix4.inverse(transform, droneTrackingHeadingInverseTransform);
 
       // 将 p2 转到 p1 的局部坐标系
-      const p2Local = Cesium.Matrix4.multiplyByPoint(invTransform, p2, new Cesium.Cartesian3());
+      const p2Local = Cesium.Matrix4.multiplyByPoint(invTransform, p2, droneTrackingHeadingLocalPoint);
 
       // 计算角度: atan2(y, x) 是相对东方向的逆时针角度
       // Cesium Heading 是相对北方向的顺时针角度
@@ -1051,63 +1112,64 @@ async loadSiteModelTilesets(Cesium) {
     },
     enableChaseCamera(entity, distance = 80, height = 30) {
       const Cesium = this.cesiumLib || window.Cesium;
+      if (!Cesium || !this.viewer) return;
+      ensureChaseCameraScratch(Cesium)
 
       // 1. 清理旧的监听器，防止重复绑定导致相机乱晃
       if (this.chaseCameraListener) {
-        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+        this.viewer.scene.preUpdate.removeEventListener(this.chaseCameraListener);
         this.chaseCameraListener = null;
       }
 
       // 2. 定义每帧刷新逻辑
       this.chaseCameraListener = () => {
         // 只有无人机存在且在显示时才跟随
-        if (!entity || !entity.show) return;
+        if (!this.viewer || !entity || !entity.show) return;
 
-        const time = this.viewer?.clock?.currentTime || Cesium.JulianDate.now();
+        const time = this.viewer.clock?.currentTime;
+        if (!time) return;
 
         // 获取当前时刻的位置和朝向
-        const position = entity.position?.getValue(time);
-        const orientation = entity.orientation?.getValue(time);
+        const position = entity.position?.getValue(time, chaseScratchPosition);
+        const orientation = entity.orientation?.getValue(time, chaseScratchOrientation);
 
         if (position) {
           // A. 计算模型变换矩阵 (Model Matrix)
           // 这个矩阵代表了无人机当前的坐标系：原点在无人机中心，轴向跟随无人机旋转
           const transform = orientation
             ? Cesium.Matrix4.fromRotationTranslation(
-              Cesium.Matrix3.fromQuaternion(orientation),
-              position
+              Cesium.Matrix3.fromQuaternion(orientation, chaseScratchRotationMatrix),
+              position,
+              chaseScratchTransform
             )
-            : Cesium.Transforms.eastNorthUpToFixedFrame(position);
+            : Cesium.Transforms.eastNorthUpToFixedFrame(position, undefined, chaseScratchTransform);
 
           // B. 定义相机在【局部坐标系】中的位置
           // 假设：X轴是正前方，Y轴是右侧，Z轴是上方
           // 我们要放在：后方 (-X) 且 上方 (+Z)
           // 注意：不同模型的坐标系可能不同。如果发现相机在侧面，请调整这里的 x/y 值
-// B. 定义相机在【局部坐标系】中的位置
           // 💡 魔法抵消：为了不让相机跟着歪，这里要反向补偿！
           // 如果下面模型补偿了 -45 度，这里就填正的 45。如果不准，可以试试 135 或 -135。
-          const cameraFixAngle = Cesium.Math.toRadians(-20); 
-          
+          const cameraFixAngle = Cesium.Math.toRadians(-20);
+
           const offsetX = -distance * Math.cos(cameraFixAngle);
           const offsetY = -distance * Math.sin(cameraFixAngle);
-          
-          const offset = new Cesium.Cartesian3(offsetX, offsetY, height);
+          const offset = Cesium.Cartesian3.fromElements(offsetX, offsetY, height, chaseScratchOffset);
+
           // C. 将局部偏移量转换为世界坐标
           const cameraPosition = Cesium.Matrix4.multiplyByPoint(
-              transform,
-              offset,
-              new Cesium.Cartesian3()
+            transform,
+            offset,
+            chaseScratchCameraPosition
           );
 
           // D. 设置相机
           // destination: 相机位置 (世界坐标)
           // orientation: 让相机看向无人机中心 (direction)
-
-          // 计算相机看向目标的方向向量
           const direction = Cesium.Cartesian3.subtract(
-              position,
-              cameraPosition,
-              new Cesium.Cartesian3()
+            position,
+            cameraPosition,
+            chaseScratchDirection
           );
           Cesium.Cartesian3.normalize(direction, direction);
 
@@ -1115,46 +1177,51 @@ async loadSiteModelTilesets(Cesium) {
           this.viewer.camera.setView({
             destination: cameraPosition,
             orientation: {
-              direction: direction,
-              up: Cesium.Cartesian3.normalize(position, new Cesium.Cartesian3()) // 使用地心向量作为Up，保持地球水平
+              direction,
+              up: Cesium.Cartesian3.normalize(position, chaseScratchUp) // 使用地心向量作为Up，保持地球水平
             }
           });
         }
       };
 
       // 3. 绑定到场景更新事件 (每一帧渲染前执行)
-      this.viewer.scene.postUpdate.addEventListener(this.chaseCameraListener);
+      this.viewer.scene.preUpdate.addEventListener(this.chaseCameraListener);
     },
     // --- 辅助方法 ---
     enableDynamicChaseCamera(entity, offsetProperty) {
       const Cesium = this.cesiumLib || window.Cesium;
+      if (!Cesium || !this.viewer) return;
+      ensureChaseCameraScratch(Cesium)
 
       if (this.chaseCameraListener) {
-        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+        this.viewer.scene.preUpdate.removeEventListener(this.chaseCameraListener);
+        this.chaseCameraListener = null;
       }
 
       this.chaseCameraListener = () => {
-        if (!entity || !entity.show) return;
+        if (!this.viewer || !entity || !entity.show) return;
 
-        const time = this.viewer.clock.currentTime;
+        const time = this.viewer.clock?.currentTime;
+        if (!time) return;
 
         // 1. 获取当前时刻的各项属性
-        const position = entity.position.getValue(time);
-        const orientation = entity.orientation.getValue(time);
+        const position = entity.position?.getValue(time, chaseScratchPosition);
+        const orientation = entity.orientation?.getValue(time, chaseScratchOrientation);
         // 【关键】获取当前时刻应该有的相机偏移量 (是远是近，由时间轴决定)
-        const currentOffset = offsetProperty.getValue(time);
+        const currentOffset = offsetProperty?.getValue(time, chaseScratchDynamicOffset);
 
         if (position && orientation && currentOffset) {
           const transform = Cesium.Matrix4.fromRotationTranslation(
-              Cesium.Matrix3.fromQuaternion(orientation),
-              position
+            Cesium.Matrix3.fromQuaternion(orientation, chaseScratchRotationMatrix),
+            position,
+            chaseScratchTransform
           );
 
           // 2. 应用动态偏移量
           const cameraPosition = Cesium.Matrix4.multiplyByPoint(
-              transform,
-              currentOffset,
-              new Cesium.Cartesian3()
+            transform,
+            currentOffset,
+            chaseScratchCameraPosition
           );
 
           // 3. 计算朝向 (相机始终盯着无人机中心)
@@ -1162,17 +1229,21 @@ async loadSiteModelTilesets(Cesium) {
           // 所以这里做一个微调：
           // 如果 currentOffset.x > 0 (在机头前方)，我们就让相机看向前方无限远，模拟第一人称
           // 如果 currentOffset.x < 0 (在机尾后方)，我们就看向无人机
-
           let direction;
 
           if (currentOffset.x > 0) {
             // 模拟第一人称：方向就是无人机的正前方
             // 简单做法：取 transform 的 X 轴方向
-            const forwardTarget = Cesium.Matrix4.multiplyByPoint(transform, new Cesium.Cartesian3(100, 0, 0), new Cesium.Cartesian3());
-            direction = Cesium.Cartesian3.subtract(forwardTarget, cameraPosition, new Cesium.Cartesian3());
+            const forwardOffset = Cesium.Cartesian3.fromElements(100, 0, 0, chaseScratchForwardOffset)
+            const forwardTarget = Cesium.Matrix4.multiplyByPoint(
+              transform,
+              forwardOffset,
+              chaseScratchForwardTarget
+            );
+            direction = Cesium.Cartesian3.subtract(forwardTarget, cameraPosition, chaseScratchDirection);
           } else {
             // 模拟第三人称：看向无人机
-            direction = Cesium.Cartesian3.subtract(position, cameraPosition, new Cesium.Cartesian3());
+            direction = Cesium.Cartesian3.subtract(position, cameraPosition, chaseScratchDirection);
           }
 
           Cesium.Cartesian3.normalize(direction, direction);
@@ -1180,14 +1251,14 @@ async loadSiteModelTilesets(Cesium) {
           this.viewer.camera.setView({
             destination: cameraPosition,
             orientation: {
-              direction: direction,
-              up: Cesium.Cartesian3.normalize(position, new Cesium.Cartesian3())
+              direction,
+              up: Cesium.Cartesian3.normalize(position, chaseScratchUp)
             }
           });
         }
       };
 
-      this.viewer.scene.postUpdate.addEventListener(this.chaseCameraListener);
+      this.viewer.scene.preUpdate.addEventListener(this.chaseCameraListener);
     },
     setCameraMode(mode) {
       if (!mode) return;
@@ -1212,7 +1283,7 @@ async loadSiteModelTilesets(Cesium) {
       }
 
       if (this.chaseCameraListener) {
-        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+        this.viewer.scene.preUpdate.removeEventListener(this.chaseCameraListener);
         this.chaseCameraListener = null;
       }
       this.viewer.trackedEntity = undefined;
@@ -1315,7 +1386,7 @@ async loadSiteModelTilesets(Cesium) {
         if (!Cesium) return;
 
         if (this.chaseCameraListener) {
-          this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+          this.viewer.scene.preUpdate.removeEventListener(this.chaseCameraListener);
           this.chaseCameraListener = null;
         }
         this.viewer.trackedEntity = undefined;
@@ -1646,6 +1717,7 @@ async loadSiteModelTilesets(Cesium) {
       this.selectedDock = dock
       this.loadFlightStatsForDock(dock)
       this.latestPositions = []
+      this.latestPositionsCacheKey = ''
       this.positionLoading = false
       if (!previousDockSn || previousDockSn !== dock?.dock_sn) {
         this.resetProtectedTaskContext()
@@ -1850,17 +1922,34 @@ async loadSiteModelTilesets(Cesium) {
       try {
         const response = await dronePositionApi.getPositions({
           device_sn: deviceSn,
-          ordering: '-timestamp'
+          ordering: '-timestamp',
+          page_size: DRONE_POSITION_PAGE_SIZE,
+          limit: DRONE_POSITION_PAGE_SIZE
         })
         if (this.selectedDock?.drone_sn !== deviceSn) return
-        const list = Array.isArray(response) ? response : (response.results || [])
-        this.latestPositions = list.slice(0, 2)
+        const list = Array.isArray(response)
+          ? response.slice(0, DRONE_POSITION_PAGE_SIZE)
+          : ((response.results || []).slice(0, DRONE_POSITION_PAGE_SIZE))
+        this.updateLatestPositionsPanel(list)
         this.updateDigitalTwinFromPositions(list)
       } catch (error) {
         console.error('获取无人机位置失败:', error)
       } finally {
         this.positionLoading = false
       }
+    },
+    updateLatestPositionsPanel(positions) {
+      const nextPositions = Array.isArray(positions) ? positions.slice(0, DRONE_POSITION_PAGE_SIZE) : []
+      const nextCacheKey = nextPositions
+        .map(item => `${item?.id ?? ''}:${this.getPositionTimestamp(item)}`)
+        .join('|')
+
+      if (this.latestPositionsCacheKey === nextCacheKey && this.latestPositions.length === nextPositions.length) {
+        return
+      }
+
+      this.latestPositionsCacheKey = nextCacheKey
+      this.latestPositions = nextPositions
     },
 
     getDockDisplayName(dock) {
@@ -1887,10 +1976,38 @@ async loadSiteModelTilesets(Cesium) {
       this.lastTaskInfoAttempt = now
       void this.syncWaylineFromTaskInfo(dockSn)
     },
+    pruneDroneTrackingSamples(sampleTime, timestamp) {
+      const Cesium = this.cesiumLib || window.Cesium
+      if (!Cesium || !this.dronePositionProperty || !this.droneOrientationProperty) return
+      if (
+        Number.isFinite(this.lastDroneSamplePruneTimestamp) &&
+        timestamp - this.lastDroneSamplePruneTimestamp < DRONE_SAMPLE_PRUNE_INTERVAL_MS
+      ) {
+        return
+      }
+
+      ensureDroneTrackingScratch(Cesium)
+
+      const pruneBefore = Cesium.JulianDate.addSeconds(
+        sampleTime,
+        -DRONE_SAMPLE_RETENTION_SECONDS,
+        droneTrackingPruneBefore
+      )
+
+      droneTrackingTrimInterval.start = Cesium.JulianDate.MINIMUM_VALUE
+      droneTrackingTrimInterval.stop = pruneBefore
+      droneTrackingTrimInterval.isStartIncluded = true
+      droneTrackingTrimInterval.isStopIncluded = false
+
+      this.dronePositionProperty.removeSamples(droneTrackingTrimInterval)
+      this.droneOrientationProperty.removeSamples(droneTrackingTrimInterval)
+      this.lastDroneSamplePruneTimestamp = timestamp
+    },
     updateDroneEntityFromPosition(position) {
       if (!position || !this.viewer) return
       const Cesium = this.cesiumLib || window.Cesium
       if (!Cesium) return
+      ensureDroneTrackingScratch(Cesium)
 
       const timestamp = this.getPositionTimestamp(position)
       if (!Number.isFinite(timestamp)) return
@@ -1930,6 +2047,7 @@ async loadSiteModelTilesets(Cesium) {
       }
 
       this.dronePositionProperty.addSample(sampleTime, cartesian)
+      this.pruneDroneTrackingSamples(sampleTime, timestamp)
 
       const resolvedHeading = this.resolveDroneHeading(payload.heading, cartesian)
       const heading = Number.isFinite(resolvedHeading) ? resolvedHeading : 0
@@ -1941,9 +2059,15 @@ async loadSiteModelTilesets(Cesium) {
       // 注意：这里的数字要和上面相机的数字【符号相反】！
       const modelHeadingOffset = Cesium.Math.toRadians(20); 
 
+      droneTrackingHeadingPitchRoll.heading = heading + modelHeadingOffset
+      droneTrackingHeadingPitchRoll.pitch = pitch
+      droneTrackingHeadingPitchRoll.roll = roll
       const orientation = Cesium.Transforms.headingPitchRollQuaternion(
         cartesian,
-        new Cesium.HeadingPitchRoll(heading + modelHeadingOffset, pitch, roll)
+        droneTrackingHeadingPitchRoll,
+        undefined,
+        undefined,
+        droneTrackingOrientationSample
       )
       this.droneOrientationProperty.addSample(sampleTime, orientation)
 
@@ -1975,10 +2099,17 @@ async loadSiteModelTilesets(Cesium) {
 
       const clock = this.viewer.clock
       if (clock) {
-        const renderTime = Cesium.JulianDate.addSeconds(sampleTime, -3, new Cesium.JulianDate())
-        clock.currentTime = renderTime
-        clock.shouldAnimate = true
+        const renderTime = Cesium.JulianDate.addSeconds(sampleTime, -3, droneTrackingRenderTime)
+        const driftSeconds = Math.abs(Cesium.JulianDate.secondsDifference(clock.currentTime, renderTime))
+        if (driftSeconds >= 0.5) {
+          clock.currentTime = renderTime
+        }
+        if (!clock.shouldAnimate) {
+          clock.shouldAnimate = true
+        }
       }
+
+      this.viewer.scene.requestRender()
 
       if (this.cameraMode === 'bird') {
         this.updateBirdCameraFromCoords(longitude, latitude, altitude)
@@ -3197,6 +3328,13 @@ extractPositionData(position) {
       this.lastDroneCartesian = null;
       this.dronePositionProperty = null;
       this.droneOrientationProperty = null;
+      this.lastDroneSamplePruneTimestamp = null;
+      if (this.viewer?.clock) {
+        this.viewer.clock.shouldAnimate = false;
+      }
+      if (this.viewer?.scene) {
+        this.viewer.scene.requestRender();
+      }
     },
 
     clearDigitalTwin() {
@@ -3213,7 +3351,7 @@ extractPositionData(position) {
         this.droneEntity = null;
       }
       if (this.viewer && this.chaseCameraListener) {
-        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+        this.viewer.scene.preUpdate.removeEventListener(this.chaseCameraListener);
         this.chaseCameraListener = null;
       }
       this.clearActionDetailMarkers();
