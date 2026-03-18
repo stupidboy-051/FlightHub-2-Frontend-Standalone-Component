@@ -1592,6 +1592,19 @@ async loadSiteModelTilesets(Cesium) {
             byDevice.set(deviceSn, item)
           }
         })
+        const selectedDock = this.selectedDock
+        const selectedDroneSn = selectedDock?.drone_sn
+        const selectedPosition = selectedDroneSn ? byDevice.get(selectedDroneSn) : null
+        if (
+          this.currentMode === 'monitor' &&
+          selectedDock &&
+          selectedDroneSn &&
+          this.isDroneWorking(selectedDock) &&
+          selectedPosition
+        ) {
+          this.updateLatestPositionsPanel([selectedPosition])
+          this.updateDigitalTwinFromPositions([selectedPosition])
+        }
         const selectedKey = this.getFlightStatsKey(this.selectedDock)
         this.docks.forEach(dock => {
           if (!dock?.drone_sn) return
@@ -1660,6 +1673,23 @@ async loadSiteModelTilesets(Cesium) {
             this.syncLiveStreamType()
             if (!(match.drone_in_dock === 1 || match.drone_in_dock === '1')) {
               this.showCreateTaskDialog = false
+            }
+          }
+        } else if (this.currentMode === 'monitor') {
+          const preferredDock = list.find(dock => dock?.drone_sn && this.isDroneWorking(dock)) || list.find(dock => dock?.drone_sn)
+          if (preferredDock) {
+            this.selectedDock = preferredDock
+            this.loadFlightStatsForDock(preferredDock)
+            this.syncLiveStreamType()
+            this.autoStartThirdPersonForTaskDock(preferredDock)
+            if (!(preferredDock.drone_in_dock === 1 || preferredDock.drone_in_dock === '1')) {
+              this.showCreateTaskDialog = false
+            }
+            const dockSn = preferredDock?.dock_sn
+            if (dockSn) {
+              this.lastTaskInfoSn = dockSn
+              this.lastTaskInfoAttempt = Date.now()
+              void this.syncWaylineFromTaskInfo(dockSn)
             }
           }
         }
@@ -1964,6 +1994,7 @@ async loadSiteModelTilesets(Cesium) {
       const latestPosition = Array.isArray(positions) ? positions[0] : null
       if (latestPosition) {
         this.updateDroneEntityFromPosition(latestPosition)
+        this.setDroneVisibility(true)
       }
       const dockSn = this.selectedDock?.dock_sn
       if (!dockSn) return
@@ -2072,12 +2103,14 @@ async loadSiteModelTilesets(Cesium) {
       this.droneOrientationProperty.addSample(sampleTime, orientation)
 
       if (!this.droneEntity) {
+        const modelUri = this.resolveAssetPath('models/fly2.glb')
         this.droneEntity = this.viewer.entities.add({
           name: '无人机',
+          show: true,
           position: this.dronePositionProperty,
           orientation: this.droneOrientationProperty,
           model: {
-            uri: './models/fly2.glb',
+            uri: modelUri,
             minimumPixelSize: 128,
             maximumScale: 2000,
             scale: 0.3,
@@ -2090,6 +2123,9 @@ async loadSiteModelTilesets(Cesium) {
         }
         if (this.droneEntity.orientation !== this.droneOrientationProperty) {
           this.droneEntity.orientation = this.droneOrientationProperty
+        }
+        if (this.droneEntity.show !== true) {
+          this.droneEntity.show = true
         }
       }
 
@@ -2871,47 +2907,47 @@ extractPositionData(position) {
         console.warn('获取组件配置失败，将使用默认配置', err);
       }
     },
-    async setupImageryLayers(Cesium) {
-      if (!this.viewer) return
-      const layers = this.viewer.imageryLayers
-      layers.removeAll()
-      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}'
-      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0)
-      try {
-        const layer = new Cesium.UrlTemplateImageryProvider({
-          url: localTilesUrl,
-          tilingScheme: new Cesium.WebMercatorTilingScheme(),
-          rectangle: extent,
-          minimumLevel: 0,
-          maximumLevel: 19
-        })
-        layers.addImageryProvider(layer)
-      } catch (e) {
-        console.warn('地图加载失败', e)
-      }
-    },
     // async setupImageryLayers(Cesium) {
-    //   if (!this.viewer) return;
-    //   const layers = this.viewer.imageryLayers;
-    //   layers.removeAll();
-
+    //   if (!this.viewer) return
+    //   const layers = this.viewer.imageryLayers
+    //   layers.removeAll()
+    //   const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}'
+    //   const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0)
     //   try {
-    //     // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
-    //     const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-    //         'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
-    //     );
-    //     layers.addImageryProvider(arcgisProvider);
-
-    //     // 叠加一层透明的混合路网（可选，为了看地名）
-    //     const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-    //       'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
-    //     );
-    //     layers.addImageryProvider(roads);
-
+    //     const layer = new Cesium.UrlTemplateImageryProvider({
+    //       url: localTilesUrl,
+    //       tilingScheme: new Cesium.WebMercatorTilingScheme(),
+    //       rectangle: extent,
+    //       minimumLevel: 0,
+    //       maximumLevel: 19
+    //     })
+    //     layers.addImageryProvider(layer)
     //   } catch (e) {
-    //     console.warn('地图加载失败', e);
+    //     console.warn('地图加载失败', e)
     //   }
     // },
+    async setupImageryLayers(Cesium) {
+      if (!this.viewer) return;
+      const layers = this.viewer.imageryLayers;
+      layers.removeAll();
+
+      try {
+        // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
+        const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+        );
+        layers.addImageryProvider(arcgisProvider);
+
+        // 叠加一层透明的混合路网（可选，为了看地名）
+        const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
+        );
+        layers.addImageryProvider(roads);
+
+      } catch (e) {
+        console.warn('地图加载失败', e);
+      }
+    },
     tuneCameraControls(controller) {
       if (!controller) return;
       const applyNumber = (key, value) => {
