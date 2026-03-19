@@ -430,6 +430,7 @@ const CESIUM_MAX_RENDER_TIME_CHANGE = 1 / CESIUM_TARGET_FRAME_RATE
 const DRONE_POSITION_PAGE_SIZE = 2
 const DRONE_SAMPLE_RETENTION_SECONDS = 20
 const DRONE_SAMPLE_PRUNE_INTERVAL_MS = 2000
+const DRONE_TELEMETRY_ACTIVE_WINDOW_MS = 15000
 
 let chaseScratchRotationMatrix = null
 let chaseScratchTransform = null
@@ -541,6 +542,8 @@ export default {
       dockPollQueued: false,
       selectedDock: null,
       latestPositions: [],
+      latestTelemetryTimestampsByDevice: {},
+      latestTelemetryPositionsByDevice: {},
       positionLoading: false,
       positionPollTimer: null,
       positionPollingDeviceSn: '',
@@ -1585,21 +1588,22 @@ async loadSiteModelTilesets(Cesium) {
         const response = await dronePositionApi.getLatestByDevice()
         const list = Array.isArray(response) ? response : (response.results || response.data || [])
         if (!Array.isArray(list) || list.length === 0) return
+        list.forEach(item => {
+          this.recordTelemetryHeartbeat(item)
+        })
         const byDevice = new Map()
         list.forEach(item => {
-          const deviceSn = item?.device_sn || item?.drone_sn || item?.sn
+          const deviceSn = this.normalizeDeviceSn(item?.device_sn || item?.drone_sn || item?.sn)
           if (deviceSn) {
             byDevice.set(deviceSn, item)
           }
         })
         const selectedDock = this.selectedDock
-        const selectedDroneSn = selectedDock?.drone_sn
+        const selectedDroneSn = this.normalizeDeviceSn(selectedDock?.drone_sn)
         const selectedPosition = selectedDroneSn ? byDevice.get(selectedDroneSn) : null
         if (
-          this.currentMode === 'monitor' &&
-          selectedDock &&
+          this.shouldShowSelectedDrone(selectedDock) &&
           selectedDroneSn &&
-          this.isDroneWorking(selectedDock) &&
           selectedPosition
         ) {
           this.updateLatestPositionsPanel([selectedPosition])
@@ -1607,10 +1611,11 @@ async loadSiteModelTilesets(Cesium) {
         }
         const selectedKey = this.getFlightStatsKey(this.selectedDock)
         this.docks.forEach(dock => {
-          if (!dock?.drone_sn) return
+          const dockDroneSn = this.normalizeDeviceSn(dock?.drone_sn)
+          if (!dockDroneSn) return
           if (!this.isDroneWorking(dock)) return
           if (this.getFlightStatsKey(dock) === selectedKey) return
-          const position = byDevice.get(dock.drone_sn)
+          const position = byDevice.get(dockDroneSn)
           if (position) {
             this.updateFlightStatsForDockFromPosition(position, dock)
           }
@@ -1720,6 +1725,7 @@ async loadSiteModelTilesets(Cesium) {
         }
         if (this.selectedDock) {
           this.startPositionPolling()
+          this.syncSelectedDockDronePresentation()
         }
       } catch (error) {
         console.error('获取机场列表失败:', error)
@@ -1760,6 +1766,7 @@ async loadSiteModelTilesets(Cesium) {
       }
       this.syncLiveStreamType()
       this.startPositionPolling()
+      this.syncSelectedDockDronePresentation()
       this.autoStartThirdPersonForTaskDock(dock)
       const dockSn = dock?.dock_sn
       if (dockSn) {
@@ -1914,8 +1921,8 @@ async loadSiteModelTilesets(Cesium) {
     },
 
     startPositionPolling() {
-      const deviceSn = this.selectedDock?.drone_sn
-      const shouldPoll = deviceSn && this.isDroneWorking(this.selectedDock)
+      const deviceSn = this.normalizeDeviceSn(this.selectedDock?.drone_sn)
+      const shouldPoll = deviceSn && this.shouldShowSelectedDrone(this.selectedDock)
       if (!shouldPoll) {
         this.stopPositionPolling()
         if (this.currentMode !== 'analysis') {
@@ -1946,8 +1953,8 @@ async loadSiteModelTilesets(Cesium) {
     },
 
     async fetchLatestPositions() {
-      const deviceSn = this.selectedDock?.drone_sn
-      if (!deviceSn || this.positionLoading || !this.isDroneWorking(this.selectedDock)) return
+      const deviceSn = this.normalizeDeviceSn(this.selectedDock?.drone_sn)
+      if (!deviceSn || this.positionLoading || !this.shouldShowSelectedDrone(this.selectedDock)) return
       this.positionLoading = true
       try {
         const response = await dronePositionApi.getPositions({
@@ -1956,10 +1963,13 @@ async loadSiteModelTilesets(Cesium) {
           page_size: DRONE_POSITION_PAGE_SIZE,
           limit: DRONE_POSITION_PAGE_SIZE
         })
-        if (this.selectedDock?.drone_sn !== deviceSn) return
+        if (this.normalizeDeviceSn(this.selectedDock?.drone_sn) !== deviceSn) return
         const list = Array.isArray(response)
           ? response.slice(0, DRONE_POSITION_PAGE_SIZE)
           : ((response.results || []).slice(0, DRONE_POSITION_PAGE_SIZE))
+        list.forEach(item => {
+          this.recordTelemetryHeartbeat(item)
+        })
         this.updateLatestPositionsPanel(list)
         this.updateDigitalTwinFromPositions(list)
       } catch (error) {
@@ -1981,6 +1991,56 @@ async loadSiteModelTilesets(Cesium) {
       this.latestPositionsCacheKey = nextCacheKey
       this.latestPositions = nextPositions
     },
+    recordTelemetryHeartbeat(position) {
+      const deviceSn = this.normalizeDeviceSn(position?.device_sn || position?.drone_sn || position?.sn)
+      const timestamp = this.getPositionTimestamp(position)
+      if (!deviceSn || !Number.isFinite(timestamp)) return
+      this.latestTelemetryTimestampsByDevice = {
+        ...this.latestTelemetryTimestampsByDevice,
+        [deviceSn]: timestamp
+      }
+      this.latestTelemetryPositionsByDevice = {
+        ...this.latestTelemetryPositionsByDevice,
+        [deviceSn]: position
+      }
+    },
+    hasRecentTelemetry(deviceSn, maxAgeMs = DRONE_TELEMETRY_ACTIVE_WINDOW_MS) {
+      const normalizedSn = this.normalizeDeviceSn(deviceSn)
+      if (!normalizedSn) return false
+      const timestamp = this.latestTelemetryTimestampsByDevice?.[normalizedSn]
+      if (!Number.isFinite(timestamp)) return false
+      return Math.abs(Date.now() - timestamp) <= maxAgeMs
+    },
+    getLatestTelemetryPositionForDock(dock = this.selectedDock) {
+      const deviceSn = this.normalizeDeviceSn(dock?.drone_sn)
+      if (!deviceSn) return null
+      return this.latestTelemetryPositionsByDevice?.[deviceSn] || null
+    },
+    shouldShowSelectedDrone(dock = this.selectedDock) {
+      if (this.currentMode !== 'monitor') return false
+      if (!dock) return false
+      if (!this.normalizeDeviceSn(dock?.drone_sn)) return false
+      return this.isDroneWorking(dock)
+    },
+    syncSelectedDockDronePresentation(preferredPosition = null) {
+      if (!this.shouldShowSelectedDrone()) {
+        this.setDroneVisibility(false)
+        return false
+      }
+      const fallbackPosition = this.getLatestTelemetryPositionForDock(this.selectedDock)
+      const latestPanelPosition = Array.isArray(this.latestPositions) ? this.latestPositions[0] : null
+      const position = preferredPosition || fallbackPosition || latestPanelPosition
+      if (position) {
+        this.updateDroneEntityFromPosition(position)
+        this.setDroneVisibility(true)
+        return true
+      }
+      if (this.droneEntity) {
+        this.setDroneVisibility(true)
+        return true
+      }
+      return false
+    },
 
     getDockDisplayName(dock) {
       return dock?.display_name || dock?.dock_name || dock?.dock_sn || '未知机场'
@@ -1992,10 +2052,7 @@ async loadSiteModelTilesets(Cesium) {
         return
       }
       const latestPosition = Array.isArray(positions) ? positions[0] : null
-      if (latestPosition) {
-        this.updateDroneEntityFromPosition(latestPosition)
-        this.setDroneVisibility(true)
-      }
+      this.syncSelectedDockDronePresentation(latestPosition)
       const dockSn = this.selectedDock?.dock_sn
       if (!dockSn) return
       const now = Date.now()
@@ -2025,7 +2082,7 @@ async loadSiteModelTilesets(Cesium) {
         droneTrackingPruneBefore
       )
 
-      droneTrackingTrimInterval.start = Cesium.JulianDate.MINIMUM_VALUE
+      droneTrackingTrimInterval.start = Cesium.Iso8601.MINIMUM_VALUE
       droneTrackingTrimInterval.stop = pruneBefore
       droneTrackingTrimInterval.isStartIncluded = true
       droneTrackingTrimInterval.isStopIncluded = false
@@ -2035,122 +2092,126 @@ async loadSiteModelTilesets(Cesium) {
       this.lastDroneSamplePruneTimestamp = timestamp
     },
     updateDroneEntityFromPosition(position) {
-      if (!position || !this.viewer) return
-      const Cesium = this.cesiumLib || window.Cesium
-      if (!Cesium) return
-      ensureDroneTrackingScratch(Cesium)
+      try {
+        if (!position) return
+        if (!this.viewer) return
+        const Cesium = this.cesiumLib || window.Cesium
+        if (!Cesium) return
+        ensureDroneTrackingScratch(Cesium)
 
-      const timestamp = this.getPositionTimestamp(position)
-      if (!Number.isFinite(timestamp)) return
-      if (Number.isFinite(this.lastDroneTimestamp) && timestamp <= this.lastDroneTimestamp) {
-        return
-      }
-
-      const payload = this.extractPositionData(position)
-      const longitude = payload.longitude
-      const latitude = payload.latitude
-      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return
-      const altitude = Number.isFinite(payload.altitude) ? payload.altitude : 0
-
-      this.updateFlightStatsFromPosition(payload)
-
-      const cartesian = Cesium.Cartesian3.fromDegrees(longitude, latitude, altitude)
-      const sampleTime = Cesium.JulianDate.fromDate(new Date(timestamp))
-
-      if (!this.dronePositionProperty) {
-        this.dronePositionProperty = new Cesium.SampledPositionProperty()
-        this.dronePositionProperty.setInterpolationOptions({
-          interpolationDegree: 1,
-          interpolationAlgorithm: Cesium.LinearApproximation
-        })
-        this.dronePositionProperty.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
-        this.dronePositionProperty.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
-      }
-
-      if (!this.droneOrientationProperty) {
-        this.droneOrientationProperty = new Cesium.SampledProperty(Cesium.Quaternion)
-        this.droneOrientationProperty.setInterpolationOptions({
-          interpolationDegree: 1,
-          interpolationAlgorithm: Cesium.LinearApproximation
-        })
-        this.droneOrientationProperty.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
-        this.droneOrientationProperty.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
-      }
-
-      this.dronePositionProperty.addSample(sampleTime, cartesian)
-      this.pruneDroneTrackingSamples(sampleTime, timestamp)
-
-      const resolvedHeading = this.resolveDroneHeading(payload.heading, cartesian)
-      const heading = Number.isFinite(resolvedHeading) ? resolvedHeading : 0
-      const pitch = Number.isFinite(payload.pitch) ? payload.pitch : 0
-      const roll = Number.isFinite(payload.roll) ? payload.roll : 0
-      
-      // 💡 模型姿态补偿：把歪掉的机头掰正
-      // 刚才推测是偏了 45 度，所以这里减去 45。
-      // 注意：这里的数字要和上面相机的数字【符号相反】！
-      const modelHeadingOffset = Cesium.Math.toRadians(20); 
-
-      droneTrackingHeadingPitchRoll.heading = heading + modelHeadingOffset
-      droneTrackingHeadingPitchRoll.pitch = pitch
-      droneTrackingHeadingPitchRoll.roll = roll
-      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
-        cartesian,
-        droneTrackingHeadingPitchRoll,
-        undefined,
-        undefined,
-        droneTrackingOrientationSample
-      )
-      this.droneOrientationProperty.addSample(sampleTime, orientation)
-
-      if (!this.droneEntity) {
-        const modelUri = this.resolveAssetPath('models/fly2.glb')
-        this.droneEntity = this.viewer.entities.add({
-          name: '无人机',
-          show: true,
-          position: this.dronePositionProperty,
-          orientation: this.droneOrientationProperty,
-          model: {
-            uri: modelUri,
-            minimumPixelSize: 128,
-            maximumScale: 2000,
-            scale: 0.3,
-            runAnimations: true
-          }
-        })
-      } else {
-        if (this.droneEntity.position !== this.dronePositionProperty) {
-          this.droneEntity.position = this.dronePositionProperty
+        const timestamp = this.getPositionTimestamp(position)
+        if (!Number.isFinite(timestamp)) return
+        if (Number.isFinite(this.lastDroneTimestamp) && timestamp <= this.lastDroneTimestamp) {
+          return
         }
+
+        const payload = this.extractPositionData(position)
+        const longitude = payload.longitude
+        const latitude = payload.latitude
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return
+        const altitude = Number.isFinite(payload.altitude) ? payload.altitude : 0
+        const cartesian = Cesium.Cartesian3.fromDegrees(longitude, latitude, altitude)
+        const sampleTime = Cesium.JulianDate.fromDate(new Date(timestamp))
+
+        if (!this.dronePositionProperty) {
+          this.dronePositionProperty = new Cesium.SampledPositionProperty()
+          this.dronePositionProperty.setInterpolationOptions({
+            interpolationDegree: 1,
+            interpolationAlgorithm: Cesium.LinearApproximation
+          })
+          this.dronePositionProperty.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+          this.dronePositionProperty.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+        }
+
+        if (!this.droneOrientationProperty) {
+          this.droneOrientationProperty = new Cesium.SampledProperty(Cesium.Quaternion)
+          this.droneOrientationProperty.setInterpolationOptions({
+            interpolationDegree: 1,
+            interpolationAlgorithm: Cesium.LinearApproximation
+          })
+          this.droneOrientationProperty.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+          this.droneOrientationProperty.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+        }
+
+        this.dronePositionProperty.addSample(sampleTime, cartesian)
+        this.pruneDroneTrackingSamples(sampleTime, timestamp)
+
+        if (!this.droneEntity) {
+          const modelUri = this.resolveAssetPath('models/fly2.glb')
+          this.droneEntity = this.viewer.entities.add({
+            name: '无人机',
+            show: true,
+            position: this.dronePositionProperty,
+            model: {
+              uri: modelUri,
+              minimumPixelSize: 128,
+              maximumScale: 2000,
+              scale: 0.3,
+              runAnimations: true
+            }
+          })
+        } else {
+          if (this.droneEntity.position !== this.dronePositionProperty) {
+            this.droneEntity.position = this.dronePositionProperty
+          }
+          if (this.droneEntity.point) {
+            this.droneEntity.point = undefined
+          }
+          if (this.droneEntity.show !== true) {
+            this.droneEntity.show = true
+          }
+        }
+
+        this.updateFlightStatsFromPosition(payload)
+
+        const resolvedHeading = this.resolveDroneHeading(payload.heading, cartesian)
+        const heading = Number.isFinite(resolvedHeading) ? resolvedHeading : 0
+        const pitch = Number.isFinite(payload.pitch) ? payload.pitch : 0
+        const roll = Number.isFinite(payload.roll) ? payload.roll : 0
+
+        const modelHeadingOffset = Cesium.Math.toRadians(20)
+
+        droneTrackingHeadingPitchRoll.heading = heading + modelHeadingOffset
+        droneTrackingHeadingPitchRoll.pitch = pitch
+        droneTrackingHeadingPitchRoll.roll = roll
+        const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+          cartesian,
+          droneTrackingHeadingPitchRoll,
+          undefined,
+          undefined,
+          droneTrackingOrientationSample
+        )
+        this.droneOrientationProperty.addSample(sampleTime, orientation)
+
         if (this.droneEntity.orientation !== this.droneOrientationProperty) {
           this.droneEntity.orientation = this.droneOrientationProperty
         }
-        if (this.droneEntity.show !== true) {
-          this.droneEntity.show = true
+
+        this.lastDroneTimestamp = timestamp
+        this.lastDronePosition = { longitude, latitude, altitude }
+        this.lastDroneCartesian = cartesian
+
+        const clock = this.viewer.clock
+        if (clock) {
+          const renderTime = Cesium.JulianDate.addSeconds(sampleTime, -3, droneTrackingRenderTime)
+          const driftSeconds = Math.abs(Cesium.JulianDate.secondsDifference(clock.currentTime, renderTime))
+          if (driftSeconds >= 0.5) {
+            clock.currentTime = renderTime
+          }
+          if (!clock.shouldAnimate) {
+            clock.shouldAnimate = true
+          }
         }
-      }
 
-      this.lastDroneTimestamp = timestamp
-      this.lastDronePosition = { longitude, latitude, altitude }
-      this.lastDroneCartesian = cartesian
+        this.viewer.scene.requestRender()
 
-      const clock = this.viewer.clock
-      if (clock) {
-        const renderTime = Cesium.JulianDate.addSeconds(sampleTime, -3, droneTrackingRenderTime)
-        const driftSeconds = Math.abs(Cesium.JulianDate.secondsDifference(clock.currentTime, renderTime))
-        if (driftSeconds >= 0.5) {
-          clock.currentTime = renderTime
+        if (this.cameraMode === 'bird') {
+          this.updateBirdCameraFromCoords(longitude, latitude, altitude)
+        } else if (this.cameraMode === 'third' && !this.chaseCameraListener) {
+          this.enableChaseCamera(this.droneEntity, 80, 30)
         }
-        if (!clock.shouldAnimate) {
-          clock.shouldAnimate = true
-        }
-      }
-
-      this.viewer.scene.requestRender()
-
-      if (this.cameraMode === 'bird') {
-        this.updateBirdCameraFromCoords(longitude, latitude, altitude)
-      } else if (this.cameraMode === 'third' && !this.chaseCameraListener) {
-        this.enableChaseCamera(this.droneEntity, 80, 30)
+      } catch (error) {
+        console.error('更新无人机实体失败:', error)
       }
     },
     getFlightStatsKey(dock = this.selectedDock) {
@@ -2457,6 +2518,10 @@ extractPositionData(position) {
         if (Number.isFinite(asNumber)) return this.normalizeTimestamp(asNumber)
       }
       return NaN
+    },
+    normalizeDeviceSn(value) {
+      const normalized = String(value || '').trim()
+      return normalized || ''
     },
     resolveDroneHeading(rawHeading, cartesian) {
       const Cesium = this.cesiumLib || window.Cesium
@@ -2847,12 +2912,13 @@ extractPositionData(position) {
     },
 
     isDroneWorking(dock) {
-      return dock?.drone_in_dock === 0 || dock?.drone_in_dock === '0'
+      if (dock?.drone_in_dock === 0 || dock?.drone_in_dock === '0') return true
+      return this.hasRecentTelemetry(dock?.drone_sn)
     },
 
     getDroneStateLabel(dock) {
+      if (this.isDroneWorking(dock)) return '任务中'
       if (dock?.drone_in_dock === 1 || dock?.drone_in_dock === '1') return '机舱内'
-      if (dock?.drone_in_dock === 0 || dock?.drone_in_dock === '0') return '任务中'
       return '状态未知'
     },
 

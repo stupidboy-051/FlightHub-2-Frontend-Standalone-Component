@@ -5,12 +5,21 @@
       <div class="nav-content" :class="isNavExpanded ? 'nav-expanded' : 'nav-collapsed'">
         <!-- Logo区域（点击返回首页） -->
         <router-link to="/main-view" class="logo-section logo-link" :style="logoShiftStyle">
-          <div class="logo-icon">
-            <img
-                src="/pho/横式组合_1_.png"
-                alt="沈阳地铁低空智能巡检平台 Logo"
-                class="logo-img"
-            />
+          <div class="logo-cluster">
+            <div class="logo-side-badge">
+              <img
+                  :src="leftBadgeLogo"
+                  alt="沈阳地铁标识"
+                  class="logo-side-badge-img"
+              />
+            </div>
+            <div class="logo-icon">
+              <img
+                  :src="brandLogo"
+                  alt="沈阳地铁低空智能巡检平台 Logo"
+                  class="logo-img"
+              />
+            </div>
           </div>
           <span class="logo-text">沈阳地铁低空智能巡检平台</span>
         </router-link>
@@ -164,6 +173,8 @@ import alarmIcon from '../pho/告警管理_实时告警.svg'
 import alarmStatsIcon from '../pho/告警统计.svg'
 import inspectTaskIcon from '../pho/巡检任务.svg'
 import userManagementIcon from '../pho/人员管理.svg'
+import brandLogo from '../pho/横式组合_1_.png'
+import leftBadgeLogo from '../pho/metro-badge-transparent.png'
 import ScreenAdapter from './utils/screenAdapter'
 
 export default {
@@ -177,6 +188,8 @@ export default {
       alarmStatsIcon,
       inspectTaskIcon,
       userManagementIcon,
+      brandLogo,
+      leftBadgeLogo,
       isAuthenticated: false,
       isAdmin: false,
       currentUserName: "",
@@ -369,6 +382,29 @@ body {
 .logo-link {
   text-decoration: none;
   cursor: pointer;
+}
+
+.logo-cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.logo-side-badge {
+  width: 54px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.logo-side-badge-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .logo-icon {
