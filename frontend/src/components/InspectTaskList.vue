@@ -1072,7 +1072,7 @@ export default {
   border: 1px solid rgba(59, 130, 246, 0.3); /* 使用蓝色系边框 */
   border-radius: 10px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
   user-select: none;
@@ -1128,7 +1128,7 @@ export default {
 .option-item {
   padding: 10px 16px;
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.2s;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
@@ -1218,7 +1218,7 @@ export default {
 .task-table th {
   padding: 14px 12px;
   text-align: left;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #3b82f6;
   text-transform: uppercase;
@@ -1246,7 +1246,7 @@ export default {
 .task-table td {
   padding: 14px 12px;
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 15px;
   border-top: 1px solid rgba(59, 130, 246, 0.1);
   border-bottom: 1px solid rgba(59, 130, 246, 0.1);
 }
@@ -1368,7 +1368,7 @@ export default {
 .datetime-text {
   font-family: 'Courier New', monospace;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .alarm-count-text {
@@ -1391,7 +1391,7 @@ export default {
   padding: 6px 12px;
   border: none;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1495,7 +1495,7 @@ export default {
 
 .text-muted {
   color: #64748b;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .device-badge {
@@ -1525,7 +1525,7 @@ export default {
 
 .pagination-info {
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .pagination-controls {
@@ -1545,7 +1545,7 @@ export default {
   border-radius: 6px;
   color: #3b82f6;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 20px;
   transition: all 0.3s ease;
 }
 
@@ -1567,7 +1567,7 @@ export default {
   border-radius: 6px;
   color: #e2e8f0;
   text-align: center;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .page-input:focus {
@@ -1577,7 +1577,7 @@ export default {
 
 .pagination-separator {
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .clear-all-btn {
@@ -1596,7 +1596,7 @@ export default {
 
 .total-pages {
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 15px;
   min-width: 30px;
   text-align: center;
 }
@@ -1705,13 +1705,13 @@ export default {
 
 .cleanup-download-sub {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
 }
 
 .cleanup-tip {
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
   margin-bottom: 12px;
 }
 
@@ -1838,7 +1838,7 @@ export default {
 
 .legend-name {
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1846,13 +1846,13 @@ export default {
 
 .legend-value {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   text-align: right;
 }
 
 .legend-percent {
   color: #3b82f6;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   text-align: right;
 }
@@ -1872,7 +1872,7 @@ export default {
 .selected-name {
   color: #e2e8f0;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 15px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1881,13 +1881,13 @@ export default {
 .selected-rate {
   color: #3b82f6;
   font-weight: 800;
-  font-size: 13px;
+  font-size: 15px;
   flex-shrink: 0;
 }
 
 .selected-meta {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   flex-shrink: 0;
 }
 
@@ -1902,7 +1902,7 @@ export default {
 }
 
 .detail-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: #64748b;
   text-transform: uppercase;
@@ -1910,7 +1910,7 @@ export default {
 }
 
 .detail-value {
-  font-size: 14px;
+  font-size: 16px;
   color: #e2e8f0;
 }
 
@@ -1935,7 +1935,7 @@ export default {
   align-items: center;
   padding: 2px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: #93c5fd;
   background: rgba(59, 130, 246, 0.12);
@@ -1946,7 +1946,7 @@ export default {
 .prefix-path {
   font-family: 'Courier New', monospace;
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 14px;
   word-break: break-all;
 }
 
@@ -1959,7 +1959,7 @@ export default {
 
 .cleanup-confirm-label {
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 15px;
   flex: 0 0 auto;
 }
 
@@ -1970,7 +1970,7 @@ export default {
   background: rgba(10, 14, 39, 0.6);
   border: 1px solid rgba(59, 130, 246, 0.3);
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
 }
 
@@ -1991,7 +1991,7 @@ export default {
   padding: 10px 24px;
   border: none;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;

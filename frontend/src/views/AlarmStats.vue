@@ -1040,7 +1040,7 @@ export default {
 
 .control-label {
   grid-column: 1 / -1;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-soft);
 }
 
@@ -1070,7 +1070,7 @@ export default {
 .updated-time {
   grid-column: 1 / -1;
   justify-self: end;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-soft);
 }
 
@@ -1107,7 +1107,7 @@ export default {
 }
 
 .big-number span {
-  font-size: 14px;
+  font-size: 16px;
   margin-left: 6px;
   color: #bfdbfe;
 }
@@ -1126,7 +1126,7 @@ export default {
 
 .meta-note {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-soft);
   line-height: 1.45;
 }
@@ -1140,13 +1140,13 @@ export default {
 .mini-item {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-soft);
 }
 
 .mini-item b {
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .safety-kpi-main {
@@ -1183,7 +1183,7 @@ export default {
 
 .gauge-score {
   fill: #93c5fd;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .safety-kpi-meta {
@@ -1199,7 +1199,7 @@ export default {
   display: flex;
   justify-content: space-between;
   color: var(--text-soft);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .metric-row b {
@@ -1237,7 +1237,7 @@ export default {
 
 .panel-header p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-soft);
 }
 
@@ -1257,7 +1257,7 @@ export default {
   border: 1px solid rgba(148, 163, 184, 0.3);
   background: rgba(15, 23, 42, 0.5);
   color: #cbd5e1;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .trend-type-chip .chip-dot {
@@ -1282,7 +1282,7 @@ export default {
   flex-direction: column;
   justify-content: space-between;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 13px;
   padding: 8px 0 25px;
 }
 
@@ -1333,7 +1333,7 @@ export default {
   margin-top: -4px;
   padding: 0 42px;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .health-panel {
@@ -1372,7 +1372,7 @@ export default {
 
 .wall-label {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .wall-value {
@@ -1381,7 +1381,7 @@ export default {
 }
 
 .wall-state {
-  font-size: 12px;
+  font-size: 14px;
   color: #93c5fd;
 }
 
@@ -1459,13 +1459,13 @@ export default {
 
 .pie-total b {
   color: #f8fafc;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1.1;
 }
 
 .pie-total span {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 13px;
   color: #94a3b8;
 }
 
@@ -1480,7 +1480,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .dot {
@@ -1546,7 +1546,7 @@ export default {
 
 .row-label {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1570,7 +1570,7 @@ export default {
 
 .row-meta {
   color: #9ca3af;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .duration-panel {
@@ -1608,7 +1608,7 @@ export default {
 }
 
 .duration-name {
-  font-size: 12px;
+  font-size: 14px;
   color: #cbd5e1;
 }
 
@@ -1628,7 +1628,7 @@ export default {
 
 .duration-value {
   text-align: right;
-  font-size: 11px;
+  font-size: 13px;
   color: #e2e8f0;
 }
 
@@ -1672,7 +1672,7 @@ export default {
 .hour-label {
   display: block;
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 12px;
   color: #94a3b8;
 }
 
@@ -1699,14 +1699,14 @@ export default {
 }
 
 .airport-head {
-  font-size: 11px;
+  font-size: 13px;
   color: #94a3b8;
   padding-bottom: 5px;
   border-bottom: 1px dashed rgba(148, 163, 184, 0.28);
 }
 
 .airport-row {
-  font-size: 12px;
+  font-size: 14px;
   color: #cbd5e1;
 }
 
@@ -1741,7 +1741,7 @@ export default {
   min-width: 36px;
   text-align: right;
   color: #f8fafc;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .chart-tooltip {
@@ -1765,7 +1765,7 @@ export default {
 }
 
 .tt-line {
-  font-size: 11px;
+  font-size: 13px;
   color: #cbd5e1;
   line-height: 1.45;
 }
@@ -1841,12 +1841,12 @@ export default {
   flex-wrap: wrap;
   gap: 10px;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .detail-id {
   color: #cbd5e1;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .state-block {
@@ -1884,7 +1884,7 @@ export default {
   color: #94a3b8;
   text-align: center;
   padding: 18px 8px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 @keyframes spin {
@@ -1977,7 +1977,7 @@ export default {
 
   .x-axis {
     padding: 0 24px;
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .hourly-chart {

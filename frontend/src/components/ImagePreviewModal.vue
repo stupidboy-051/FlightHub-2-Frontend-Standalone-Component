@@ -137,7 +137,7 @@ export default {
 
 .fh-image-preview-empty {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .fh-image-preview-footer {
@@ -150,7 +150,7 @@ export default {
 .fh-image-preview-btn {
   padding: 10px 18px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   border: 1px solid rgba(100, 116, 139, 0.3);

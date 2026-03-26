@@ -282,7 +282,7 @@ export default {
 .form-label {
   display: block;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   margin-bottom: 8px;
 }
@@ -316,7 +316,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 12px;
   color: #e2e8f0;
-  font-size: 15px;
+  font-size: 17px;
   outline: none;
   transition: all 0.3s ease;
 }
@@ -368,7 +368,7 @@ export default {
   border: none;
   border-radius: 12px;
   color: #fff;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -437,7 +437,7 @@ export default {
 
 .login-footer p {
   color: #64748b;
-  font-size: 13px;
+  font-size: 15px;
   margin: 0;
 }
 

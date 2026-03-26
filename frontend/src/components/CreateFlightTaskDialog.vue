@@ -468,7 +468,7 @@ export default {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 12px;
+  font-size: 14px;
   color: #00d4ff;
   background: rgba(0, 212, 255, 0.12);
   padding: 6px 10px;
@@ -488,7 +488,7 @@ export default {
 
 /* 修复对齐问题：为特定的非必填项模拟星号占位，并缩小字体防止突出 */
 .task-form-dialog :deep(.item-aligned .el-form-item__label) {
-  font-size: 13px; /* 稍微缩小字体 */
+  font-size: 15px; /* 稍微缩小字体 */
   letter-spacing: -0.5px; /* 紧凑字间距 */
 }
 
@@ -591,13 +591,13 @@ export default {
 
 .confirm-text {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   color: #ffffff;
 }
 
 .confirm-subtext {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: 15px;
   color: #9fb0c8;
 }
 </style>

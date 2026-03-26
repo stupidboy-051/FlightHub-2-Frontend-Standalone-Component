@@ -305,7 +305,7 @@ export default {
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   border-radius: 14px;
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
 }
@@ -332,12 +332,12 @@ export default {
   color: #e2e8f0;
 }
 .group-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 .group-count {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .toggle-icon {
   margin-left: auto;
@@ -388,7 +388,7 @@ export default {
 
 .empty-state p {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 /* 航线项 */
@@ -446,7 +446,7 @@ export default {
 }
 
 .wayline-id {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   font-family: 'Courier New', monospace;
 }
@@ -455,7 +455,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 14px;
   color: #00d4ff;
   font-family: 'Courier New', monospace;
 }
@@ -465,14 +465,14 @@ export default {
 }
 
 .wayline-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: #e2e8f0;
   line-height: 1.4;
 }
 .recent-meta {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
 }
 

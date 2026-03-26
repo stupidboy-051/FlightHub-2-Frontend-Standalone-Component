@@ -477,7 +477,7 @@ export default {
   padding: 6px 12px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 13px;
+  font-size: 15px;
   color: #e2e8f0;
 }
 
@@ -510,7 +510,7 @@ export default {
 
 .summary-value {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .header-actions {
@@ -527,7 +527,7 @@ export default {
   border: 1px solid rgba(56, 189, 248, 0.3);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -556,7 +556,7 @@ export default {
 }
 
 .update-time {
-  font-size: 13px;
+  font-size: 15px;
   color: #94a3b8;
 }
 
@@ -655,7 +655,7 @@ export default {
 }
 
 .dock-sn {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   font-family: monospace;
 }
@@ -686,14 +686,14 @@ export default {
 
 .info-label {
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   color: #94a3b8;
   margin-bottom: 2px;
 }
 
 .info-value {
   display: block;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: #e2e8f0;
   white-space: nowrap;
@@ -731,7 +731,7 @@ export default {
 }
 
 .last-update {
-  font-size: 12px;
+  font-size: 14px;
   color: #64748b;
 }
 
@@ -760,7 +760,7 @@ export default {
 .empty-state p,
 .loading-state p {
   color: #cbd5e1;
-  font-size: 16px;
+  font-size: 18px;
 }
 
 /* 详情弹窗 */
@@ -872,13 +872,13 @@ export default {
 }
 
 .detail-label {
-  font-size: 8px;
+  font-size: 10px;
   color: #94a3b8;
   font-weight: 500;
 }
 
 .detail-value {
-  font-size: 9px;
+  font-size: 11px;
   color: #e2e8f0;
   font-weight: 600;
   word-break: break-all;

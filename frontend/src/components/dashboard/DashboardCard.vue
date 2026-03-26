@@ -133,7 +133,7 @@ export default {
   color: #aaddff;
   padding: 4px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   text-decoration: none;
   transition: all 0.3s ease;
   display: flex;
@@ -231,7 +231,7 @@ export default {
 }
 
 .state-text {
-  font-size: 13px;
+  font-size: 15px;
   opacity: 0.8;
 }
 </style>

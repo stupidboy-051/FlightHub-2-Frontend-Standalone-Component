@@ -734,7 +734,7 @@ export default {
   border: none;
   border-radius: 10px;
   color: #fff;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -789,7 +789,7 @@ export default {
   border: none;
   outline: none;
   color: #e2e8f0;
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .search-input-premium::placeholder {
@@ -812,7 +812,7 @@ export default {
 
 .stat-label {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   margin-bottom: 4px;
 }
 
@@ -855,7 +855,7 @@ export default {
   padding: 16px 20px;
   text-align: left;
   color: #00d4ff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -874,7 +874,7 @@ export default {
 .premium-table td {
   padding: 16px 20px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .id-badge {
@@ -928,7 +928,7 @@ export default {
 
 .datetime-text {
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .action-buttons {
@@ -940,7 +940,7 @@ export default {
   padding: 6px 16px;
   border-radius: 6px;
   border: none;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -985,7 +985,7 @@ export default {
 
 .pagination-info {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .pagination-controls {
@@ -1001,7 +1001,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   background: rgba(0, 212, 255, 0.1);
   color: #00d4ff;
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex;
@@ -1027,7 +1027,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 8px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
 }
 
@@ -1037,12 +1037,12 @@ export default {
 
 .pagination-separator {
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .total-pages {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .page-size-select {
@@ -1051,7 +1051,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 8px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   outline: none;
 }
@@ -1147,7 +1147,7 @@ export default {
 .form-label {
   display: block;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   margin-bottom: 8px;
 }
@@ -1160,7 +1160,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 10px;
   color: #e2e8f0;
-  font-size: 15px;
+  font-size: 17px;
   outline: none;
   transition: all 0.3s ease;
 }
@@ -1187,7 +1187,7 @@ export default {
 .modal-btn {
   padding: 10px 24px;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1244,7 +1244,7 @@ export default {
 
 .delete-warning p {
   color: #e2e8f0;
-  font-size: 16px;
+  font-size: 18px;
   margin: 8px 0;
 }
 
@@ -1254,7 +1254,7 @@ export default {
 
 .warning-text {
   color: #f59e0b !important;
-  font-size: 14px !important;
+  font-size: 16px !important;
   margin-top: 12px !important;
 }
 

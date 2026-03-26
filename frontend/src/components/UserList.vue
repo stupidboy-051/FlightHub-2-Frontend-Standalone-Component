@@ -711,7 +711,7 @@ export default {
   border: none;
   border-radius: 8px;
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -771,7 +771,7 @@ export default {
   border: none;
   outline: none;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .search-input-premium::placeholder {
@@ -811,7 +811,7 @@ export default {
   padding: 12px 16px;
   text-align: left;
   color: #00d4ff;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -830,7 +830,7 @@ export default {
 .premium-table td {
   padding: 12px 16px;
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .id-badge {
@@ -884,7 +884,7 @@ export default {
 
 .datetime-text {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .action-buttons {
@@ -896,7 +896,7 @@ export default {
   padding: 4px 10px;
   border-radius: 4px;
   border: none;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -941,7 +941,7 @@ export default {
 
 .pagination-info {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .pagination-controls {
@@ -957,7 +957,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   background: rgba(0, 212, 255, 0.1);
   color: #00d4ff;
-  font-size: 16px;
+  font-size: 18px;
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex;
@@ -983,7 +983,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 6px;
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 14px;
   outline: none;
 }
 
@@ -993,12 +993,12 @@ export default {
 
 .pagination-separator {
   color: #64748b;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .total-pages {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 /* 模态框样式复用... */
@@ -1092,7 +1092,7 @@ export default {
 .form-label {
   display: block;
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   margin-bottom: 6px;
 }
@@ -1105,7 +1105,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 8px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   transition: all 0.3s ease;
 }
@@ -1132,7 +1132,7 @@ export default {
 .modal-btn {
   padding: 8px 20px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1189,7 +1189,7 @@ export default {
 
 .delete-warning p {
   color: #e2e8f0;
-  font-size: 15px;
+  font-size: 17px;
   margin: 6px 0;
 }
 
@@ -1199,7 +1199,7 @@ export default {
 
 .warning-text {
   color: #f59e0b !important;
-  font-size: 13px !important;
+  font-size: 15px !important;
   margin-top: 8px !important;
 }
 /* 模态框内的自定义下拉框样式 */
@@ -1220,7 +1220,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 8px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
   user-select: none;
@@ -1275,7 +1275,7 @@ export default {
 .option-item {
   padding: 10px 14px;
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.2s;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);

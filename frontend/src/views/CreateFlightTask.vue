@@ -56,7 +56,7 @@
                       <div style="display: flex; justify-content: space-between; align-items: center; min-width: 300px;">
                         <div>
                           <div style="font-weight: bold;">{{ device.sn }}</div>
-                          <div style="font-size: 12px; color: #909399;">{{ device.name }}</div>
+                          <div style="font-size: 14px; color: #909399;">{{ device.name }}</div>
                         </div>
                         <el-text size="small" type="info">{{ formatTime(device.last_used) }}</el-text>
                       </div>
@@ -698,7 +698,7 @@ export default {
 
 /* 修复对齐问题：为特定的非必填项模拟星号占位，并缩小字体防止突出 */
 .task-form-premium :deep(.item-aligned .el-form-item__label) {
-  font-size: 12px; /* 缩小字体到12px */
+  font-size: 14px; /* 缩小字体到12px */
   letter-spacing: -1px; /* 更紧凑的字间距 */
   white-space: nowrap;
 }
@@ -853,7 +853,7 @@ export default {
 
 .divider-label {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
 }
 
@@ -877,7 +877,7 @@ export default {
   align-items: center;
   gap: 8px;
   padding: 12px 24px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 500;
   border-radius: 8px;
   transition: all 0.3s ease;
@@ -976,7 +976,7 @@ export default {
 }
 
 .confirm-text {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: bold;
   color: #303133;
   margin: 0 0 8px;
@@ -984,7 +984,7 @@ export default {
 
 .confirm-subtext {
   color: #909399;
-  font-size: 14px;
+  font-size: 16px;
   margin: 0;
 }
 

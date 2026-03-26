@@ -835,7 +835,7 @@ initCesiumMap() {
             },
             label: {
               text: this.buildDockLabelText(dock),
-              font: '12px "Segoe UI", sans-serif',
+              font: '14px "Segoe UI", sans-serif',
               fillColor: Cesium.Color.WHITE,
               showBackground: true,
               backgroundColor: Cesium.Color.fromCssColorString('#0b1225').withAlpha(0.9),
@@ -1285,7 +1285,7 @@ initCesiumMap() {
 }
 
 .start-btn-sub {
-  font-size: 13px;
+  font-size: 15px;
   color: #7dd3fc;
   opacity: 0.8;
 }
@@ -1353,7 +1353,7 @@ initCesiumMap() {
   background: rgba(0, 162, 255, 0.12);
   border: 1px solid rgba(0, 191, 255, 0.45);
   color: #e0f2fe;
-  font-size: 12px;
+  font-size: 14px;
   padding: 4px 10px;
   border-radius: 8px;
   outline: none;
@@ -1431,7 +1431,7 @@ initCesiumMap() {
 .hero-label {
   margin: 0;
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 15px;
   letter-spacing: 1px;
 }
 .hero-number {
@@ -1441,7 +1441,7 @@ initCesiumMap() {
   text-shadow: 0 0 16px rgba(14, 165, 233, 0.7);
 }
 .hero-unit {
-  font-size: 14px;
+  font-size: 16px;
   color: #bae6fd;
   margin-left: 6px;
 }
@@ -1451,7 +1451,7 @@ initCesiumMap() {
   border: 1px solid rgba(59, 130, 246, 0.4);
   border-radius: 999px;
   color: #e0f2fe;
-  font-size: 12px;
+  font-size: 14px;
 }
 .hero-summary {
   display: flex;
@@ -1474,10 +1474,10 @@ initCesiumMap() {
   border-radius: 999px;
 }
 .chip-label {
-  font-size: 12px;
+  font-size: 14px;
 }
 .chip-value {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: #e2e8f0;
 }
@@ -1491,12 +1491,12 @@ initCesiumMap() {
 }
 .foot-label {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 14px;
   opacity: 0.9;
 }
 .foot-value {
   color: #e0f2fe;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
@@ -1546,7 +1546,7 @@ initCesiumMap() {
 .time-stamp-v2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .state-block {
@@ -1570,7 +1570,7 @@ initCesiumMap() {
   animation: spin 1s linear infinite;
 }
 .state-text {
-  font-size: 13px;
+  font-size: 15px;
   opacity: 0.8;
 }
 @keyframes spin {
@@ -1594,7 +1594,7 @@ initCesiumMap() {
 }
 .rate-sub {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .rate-list {
   display: flex;
@@ -1614,7 +1614,7 @@ initCesiumMap() {
 }
 .rate-name {
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 .rate-bar {
@@ -1629,18 +1629,18 @@ initCesiumMap() {
 }
 .rate-value {
   color: #e0f2fe;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
   text-align: right;
 }
 .rate-count {
   grid-column: 2 / -1;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 13px;
 }
 .flight-range-note {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   text-align: right;
 }
 .airport-table {
@@ -1661,7 +1661,7 @@ initCesiumMap() {
   border: 1px solid rgba(0, 191, 255, 0.4);
   border-radius: 10px;
   color: #aaddff;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 .airport-row {
@@ -1670,7 +1670,7 @@ initCesiumMap() {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .airport-col {
   min-width: 0;
@@ -1700,11 +1700,11 @@ initCesiumMap() {
 }
 .metric-label {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .metric-value {
   color: #e0f2fe;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 800;
 }
 .flight-airports {
@@ -1733,24 +1733,24 @@ initCesiumMap() {
 }
 .airport-name {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 .airport-count {
   color: #e0f2fe;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
 }
 .airports-empty {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   text-align: center;
   padding: 10px 0;
 }
 .pill {
   display: inline-block;
   padding: 2px 12px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: #a5f3fc;
   background: linear-gradient(180deg, rgba(34, 211, 238, 0.15) 0%, rgba(34, 211, 238, 0.05) 100%);
@@ -1776,7 +1776,7 @@ initCesiumMap() {
   border: 1px solid rgba(0, 191, 255, 0.3);
   background: rgba(0, 191, 255, 0.08);
   color: #aaddff;
-  font-size: 12px;
+  font-size: 14px;
   padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
@@ -1804,7 +1804,7 @@ initCesiumMap() {
 }
 .stats-label {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .stats-value {
   color: #e0f2fe;
@@ -1846,7 +1846,7 @@ initCesiumMap() {
   gap: 2px;
   width: 100%;
   color: #cbd5e1;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
 }
 .legend-name {
@@ -1861,7 +1861,7 @@ initCesiumMap() {
   color: #e0f2fe;
   font-weight: 900;
   align-self: flex-end;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
 }
 .ai-card {
@@ -1905,7 +1905,7 @@ initCesiumMap() {
 }
 .ai-sub {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .ai-controls {
   display: flex;
@@ -1934,14 +1934,14 @@ initCesiumMap() {
 }
 .ai-count {
   color: #e0f2fe;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
 }
 .ai-empty {
   padding: 18px 10px;
   text-align: center;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   border: 1px dashed rgba(0, 212, 255, 0.18);
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.25);
@@ -1955,7 +1955,7 @@ initCesiumMap() {
   gap: 12px;
   margin-bottom: 15px;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 16px;
 }
 .th-box {
   flex: 1;
@@ -1969,14 +1969,14 @@ initCesiumMap() {
   color: #aaddff;
   text-align: center;
   padding: 5px 0;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: bold;
 }
 .table-row {
   display: flex;
   gap: 12px;
   margin-bottom: 10px;
-  font-size: 16px;
+  font-size: 18px;
   transition: all 0.3s;
   align-items: center;
 }
@@ -1987,7 +1987,7 @@ initCesiumMap() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 14px;
+  font-size: 16px;
 }
 .table-header, .table-row {
   display: flex;
@@ -2044,13 +2044,13 @@ initCesiumMap() {
   min-width: 0;
 }
 .info-row .label {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   white-space: nowrap;
   margin-right: 4px;
 }
 .info-row .value {
-  font-size: 13px;
+  font-size: 15px;
   color: #f1f5f9;
   font-family: 'Inter', sans-serif;
   font-weight: 500;
@@ -2150,12 +2150,12 @@ initCesiumMap() {
 }
 
 .dock-detail-item .label {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
 }
 
 .dock-detail-item .value {
-  font-size: 14px;
+  font-size: 16px;
   color: #f8fafc;
   font-weight: 600;
   white-space: nowrap;
@@ -2175,7 +2175,7 @@ initCesiumMap() {
   border: 1px solid rgba(56, 189, 248, 0.35);
   background: rgba(30, 64, 175, 0.25);
   color: #e0f2fe;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;

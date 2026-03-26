@@ -120,7 +120,7 @@ export default {
 
 .hint {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 0.6px;
 }
 </style>

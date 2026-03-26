@@ -1,10 +1,10 @@
 <template>
   <div ref="container" class="dji-space-component-container">
     <div v-if="loading" class="loading-placeholder">
-      <p>×é¼þ¼ÓÔØÖÐ...</p>
+      <p>ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½...</p>
     </div>
     <div v-if="error" class="error-placeholder">
-      <p>×é¼þ¼ÓÔØÊ§°Ü: {{ error }}</p>
+      <p>ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½: {{ error }}</p>
     </div>
   </div>
 </template>
@@ -27,7 +27,7 @@ export default {
       type: Object,
       default: () => ({})
     },
-    // ¿ÉÑ¡£ºÊÖ¶¯Ö¸¶¨ÈÝÆ÷ ID£¨Ä¬ÈÏ×Ô¶¯Éú³É£©
+    // ï¿½ï¿½Ñ¡ï¿½ï¿½ï¿½Ö¶ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ IDï¿½ï¿½Ä¬ï¿½ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½É£ï¿½
     containerId: {
       type: String,
       default: ''
@@ -56,10 +56,10 @@ export default {
 
       try {
         if (!window.FH2) {
-          throw new Error('FH2Î´ÕýÈ·¼ÓÔØ£¬Çë¼ì²épaas.jsÊÇ·ñÕýÈ·ÒýÈë')
+          throw new Error('FH2Î´ï¿½ï¿½È·ï¿½ï¿½ï¿½Ø£ï¿½ï¿½ï¿½ï¿½ï¿½paas.jsï¿½Ç·ï¿½ï¿½ï¿½È·ï¿½ï¿½ï¿½ï¿½')
         }
 
-        // ÓÅÏÈÀ­È¡ºó¶Ë±£´æµÄ¹«¹²²ÎÊý£¬ÔÙÓÃÇ°¶Ë´«Èë¸²¸Ç
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¡ï¿½ï¿½Ë±ï¿½ï¿½ï¿½Ä¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç°ï¿½Ë´ï¿½ï¿½ë¸²ï¿½ï¿½
         let mergedConfig = {}
         try {
           this.backendConfig = await componentConfigApi.getConfig()
@@ -67,27 +67,27 @@ export default {
             mergedConfig = { ...this.backendConfig }
           }
         } catch (err) {
-          console.warn('»ñÈ¡×é¼þÅäÖÃÊ§°Ü£¬Ê¹ÓÃÇ°¶Ë´«ÈëÅäÖÃ', err)
+          console.warn('ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü£ï¿½Ê¹ï¿½ï¿½Ç°ï¿½Ë´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½', err)
         }
         mergedConfig = { ...mergedConfig, ...(this.config || {}) }
 
-        // demo ÖÐÒªÇóµÄ¹Ø¼ü×Ö¶Î
+        // demo ï¿½ï¿½Òªï¿½ï¿½Ä¹Ø¼ï¿½ï¿½Ö¶ï¿½
         if (!mergedConfig.serverUrl || !mergedConfig.hostUrl || !mergedConfig.projectToken) {
-          console.warn('FH2 ÅäÖÃÈ±ÉÙ serverUrl/hostUrl/projectToken£¬ÇëÔÚ¡°×é¼þ²ÎÊýÅäÖÃ¡±Ò³Ãæ²¹È«')
+          console.warn('FH2 ï¿½ï¿½ï¿½ï¿½È±ï¿½ï¿½ serverUrl/hostUrl/projectTokenï¿½ï¿½ï¿½ï¿½ï¿½Ú¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã¡ï¿½Ò³ï¿½æ²¹È«')
         }
         window.FH2.initConfig(mergedConfig)
 
         await this.$nextTick()
 
         if (!this.$refs.container) {
-          throw new Error('ÈÝÆ÷ÔªËØ²»´æÔÚ')
+          throw new Error('ï¿½ï¿½ï¿½ï¿½Ôªï¿½Ø²ï¿½ï¿½ï¿½ï¿½ï¿½')
         }
 
         const containerId = this.containerId || `dji-component-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
         this.$refs.container.id = containerId
 
         if (!document.getElementById(containerId)) {
-          throw new Error('ÈÝÆ÷ÔªËØÎ´ÕýÈ·´´½¨')
+          throw new Error('ï¿½ï¿½ï¿½ï¿½Ôªï¿½ï¿½Î´ï¿½ï¿½È·ï¿½ï¿½ï¿½ï¿½')
         }
 
         switch (this.componentName) {
@@ -104,13 +104,13 @@ export default {
             window.FH2.loadWaylineCreation(containerId)
             break
           default:
-            throw new Error(`²»Ö§³ÖµÄ×é¼þÃû³Æ: ${this.componentName}`)
+            throw new Error(`ï¿½ï¿½Ö§ï¿½Öµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: ${this.componentName}`)
         }
 
         this.loaded = true
       } catch (err) {
         this.error = err.message
-        console.error('×é¼þ¼ÓÔØÊ§°Ü:', err)
+        console.error('ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½:', err)
       } finally {
         this.loading = false
       }
@@ -137,7 +137,7 @@ export default {
 
 .loading-placeholder p,
 .error-placeholder p {
-  font-size: 16px;
+  font-size: 18px;
   color: #666;
 }
 </style>

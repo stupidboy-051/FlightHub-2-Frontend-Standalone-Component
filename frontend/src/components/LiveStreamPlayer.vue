@@ -729,7 +729,7 @@ export default {
 }
 
 .stream-label {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: #e2e8f0;
 }
@@ -827,7 +827,7 @@ export default {
   border-radius: 8px;
   background: rgba(26, 31, 58, 0.8);
   color: #10b981;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
@@ -920,7 +920,7 @@ export default {
 }
 
 .error-message {
-  font-size: 14px;
+  font-size: 16px;
   color: #ef4444;
   text-align: center;
   margin: 0;
@@ -933,7 +933,7 @@ export default {
   border-radius: 8px;
   background: rgba(0, 212, 255, 0.15);
   color: #00d4ff;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -953,7 +953,7 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .info-item {
@@ -1003,7 +1003,7 @@ export default {
 
 .placeholder-overlay p {
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
   margin: 0;
 }
 </style>

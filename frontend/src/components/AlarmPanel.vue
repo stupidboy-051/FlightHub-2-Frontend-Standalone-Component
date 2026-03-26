@@ -149,7 +149,7 @@ export default {
   background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   border-radius: 12px;
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
   animation: pulse 2s ease-in-out infinite;
@@ -173,7 +173,7 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
   color: #ef4444;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -247,7 +247,7 @@ export default {
 
 .empty-state p {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 /* 告警项 */
@@ -329,7 +329,7 @@ export default {
 
 .alarm-time {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   font-family: 'Courier New', monospace;
   flex-shrink: 0;
 }
@@ -340,7 +340,7 @@ export default {
 
 .alarm-description {
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
   margin: 0 0 12px 0;
 }
@@ -350,7 +350,7 @@ export default {
   align-items: center;
   gap: 6px;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   margin-bottom: 12px;
 }
 
@@ -384,7 +384,7 @@ export default {
   padding: 8px 14px;
   border-radius: 6px;
   border: none;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;

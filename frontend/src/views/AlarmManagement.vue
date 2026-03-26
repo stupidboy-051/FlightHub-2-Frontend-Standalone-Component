@@ -132,7 +132,7 @@ export default {
 /* 仅覆盖本页面内告警列表字号，整体上调一档 */
 .alarm-content :deep(.alarm-table th),
 .alarm-content :deep(.alarm-table td) {
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .alarm-content :deep(.datetime-text),

@@ -85,14 +85,14 @@ export default {
 }
 
 .task-name {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: #00d4ff;
   text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
 }
 
 .task-stats {
-  font-size: 13px;
+  font-size: 15px;
   color: #94a3b8;
 }
 
@@ -105,7 +105,7 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 8px;
   color: #00d4ff;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   font-family: 'Courier New', monospace;
 }
@@ -177,7 +177,7 @@ export default {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: #fff;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
@@ -202,13 +202,13 @@ export default {
 }
 
 .count-separator {
-  font-size: 16px;
+  font-size: 18px;
   color: #64748b;
   margin: 0 2px;
 }
 
 .count-total {
-  font-size: 16px;
+  font-size: 18px;
   color: #94a3b8;
   font-weight: 600;
 }

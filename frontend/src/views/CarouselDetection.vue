@@ -2173,7 +2173,7 @@ export default {
 .eyebrow {
   color: #7dd3fc;
   letter-spacing: 1px;
-  font-size: 12px;
+  font-size: 14px;
   text-transform: uppercase;
   margin-bottom: 4px;
 }
@@ -2227,7 +2227,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   margin-bottom: 4px;
 }
@@ -2238,7 +2238,7 @@ export default {
 }
 
 .scan-count {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .scan-table {
@@ -2301,7 +2301,7 @@ export default {
 }
 
 .folder-name {
-  font-size: 13px;
+  font-size: 15px;
   color: #e2e8f0;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -2309,7 +2309,7 @@ export default {
 }
 
 .folder-path {
-  font-size: 11px;
+  font-size: 13px;
   color: #64748b;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -2317,7 +2317,7 @@ export default {
 }
 
 .scan-type {
-  font-size: 12px;
+  font-size: 14px;
   color: #cbd5e1;
 }
 
@@ -2328,7 +2328,7 @@ export default {
 .scan-play-btn {
   margin-top: 4px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: 13px;
   border-radius: 999px;
   border: 1px solid rgba(59, 130, 246, 0.6);
   background: rgba(37, 99, 235, 0.15);
@@ -2346,7 +2346,7 @@ export default {
   display: inline-block;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -2406,7 +2406,7 @@ export default {
   border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 10px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
   user-select: none;
@@ -2467,7 +2467,7 @@ export default {
 .option-item {
   padding: 10px 16px;
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.2s;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
@@ -2522,7 +2522,7 @@ export default {
 .stat-label {
   display: block;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   margin-bottom: 4px;
 }
 
@@ -2581,7 +2581,7 @@ export default {
   padding: 7px 14px;
   border-radius: 8px;
   border: none;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   display: flex;
@@ -2633,14 +2633,14 @@ export default {
   text-align: center;
   padding: 40px 20px;
   color: #64748b;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .error-state-compact {
   text-align: center;
   padding: 40px 20px;
   color: #f87171;
-  font-size: 13px;
+  font-size: 15px;
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: 8px;
@@ -2652,7 +2652,7 @@ export default {
 }
 
 .date-header-compact {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: #06b6d4;
   padding: 6px 0;
@@ -2731,7 +2731,7 @@ export default {
   color: #38bdf8;
   padding: 4px 8px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   margin-right: 8px;
   transition: all 0.2s;
@@ -2750,7 +2750,7 @@ export default {
 }
 
 .task-name-compact {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #e0f2fe;
   overflow: hidden;
@@ -2759,7 +2759,7 @@ export default {
 }
 
 .task-type-compact {
-  font-size: 11px;
+  font-size: 13px;
   color: #94a3b8;
   margin-top: 2px;
 }
@@ -2767,7 +2767,7 @@ export default {
 .status-compact {
   padding: 4px 8px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -2823,13 +2823,13 @@ export default {
 
 .location-name {
   flex: 1;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: #7dd3fc;
 }
 
 .location-count {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   padding: 2px 8px;
   background: rgba(14, 165, 233, 0.15);
@@ -2872,13 +2872,13 @@ export default {
 
 .type-name {
   flex: 1;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #cbd5e1;
 }
 
 .type-count {
-  font-size: 11px;
+  font-size: 13px;
   color: #64748b;
   padding: 2px 6px;
   background: rgba(148, 163, 184, 0.15);
@@ -2907,7 +2907,7 @@ export default {
 }
 
 .task-side {
-  font-size: 11px;
+  font-size: 13px;
   color: #06b6d4;
   padding: 1px 6px;
   background: rgba(6, 182, 212, 0.15);
@@ -2916,11 +2916,11 @@ export default {
 
 .task-divider {
   color: #475569;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .task-time {
-  font-size: 11px;
+  font-size: 13px;
   color: #64748b;
   font-family: 'Courier New', monospace;
 }
@@ -2930,7 +2930,7 @@ export default {
   padding: 20px;
   text-align: center;
   color: #64748b;
-  font-size: 12px;
+  font-size: 14px;
   background: rgba(255, 255, 255, 0.01);
   margin: 0 12px 12px 12px;
   border-radius: 8px;
@@ -2985,7 +2985,7 @@ export default {
   align-items: center;
   gap: 6px;
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .legend-dot {
@@ -3008,7 +3008,7 @@ export default {
   background: rgba(14, 165, 233, 0.08);
   color: #e0f2fe;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   transition: all 0.2s ease;
 }
 
@@ -3082,7 +3082,7 @@ export default {
   display: grid;
   place-items: center;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05) 10px, rgba(255, 255, 255, 0.02) 10px, rgba(255, 255, 255, 0.02) 20px);
 }
 
@@ -3126,7 +3126,7 @@ export default {
   display: flex;
   justify-content: space-between;
   margin-bottom: 12px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .info-label {
@@ -3151,7 +3151,7 @@ export default {
   padding: 6px 12px;
   border-radius: 8px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .slide-pill.processing {
@@ -3178,7 +3178,7 @@ export default {
   display: grid;
   place-items: center;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05) 10px, rgba(255, 255, 255, 0.02) 10px, rgba(255, 255, 255, 0.02) 20px);
 }
 
@@ -3189,7 +3189,7 @@ export default {
   padding: 8px 12px;
   border-radius: 10px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 15px;
   backdrop-filter: blur(6px);
   pointer-events: none;
 }
@@ -3198,7 +3198,7 @@ export default {
   padding: 6px 12px;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 15px;
   display: inline-block;
 }
 
@@ -3232,7 +3232,7 @@ export default {
   border-radius: 10px;
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(12, 74, 110, 0.7));
   border: 1px solid rgba(14, 165, 233, 0.3);
-  font-size: 13px;
+  font-size: 15px;
   color: #e2e8f0;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
@@ -3262,12 +3262,12 @@ export default {
 
 .meta-time {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .meta-desc {
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .controls {
@@ -3298,7 +3298,7 @@ export default {
 
 .progress-count {
   color: #e0f2fe;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   padding: 0 10px;
 }
@@ -3359,7 +3359,7 @@ export default {
 }
 
 .image-placeholder.small {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .marquee-meta {
@@ -3376,7 +3376,7 @@ export default {
 
 .meta-time {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .light-badge {
@@ -3534,7 +3534,7 @@ export default {
   flex-direction: column;
   gap: 6px;
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .preview-meta .meta-row strong {

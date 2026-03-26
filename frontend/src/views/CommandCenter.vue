@@ -842,13 +842,13 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: 16px;
   color: #e0f2fe;
   margin-bottom: 6px;
 }
 .group-count {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .toggle-icon {
   margin-left: auto;
@@ -867,11 +867,11 @@ export default {
 }
 .item-name {
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
 }
 .item-meta {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 .stat-grid {
   display: grid;
@@ -902,7 +902,7 @@ export default {
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
 }
 
@@ -962,7 +962,7 @@ export default {
 }
 
 .ring-label {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
 }
 
@@ -1015,7 +1015,7 @@ export default {
 
 .weekday {
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
   padding: 8px 4px;
   font-weight: 600;
@@ -1063,7 +1063,7 @@ export default {
 }
 
 .day-number {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #e2e8f0;
 }
@@ -1099,7 +1099,7 @@ export default {
   padding: 10px;
   background: rgba(0, 212, 255, 0.05);
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .status-dot {
@@ -1149,7 +1149,7 @@ export default {
 }
 
 .y-label {
-  font-size: 11px;
+  font-size: 13px;
   color: #94a3b8;
   text-align: right;
   line-height: 1;
@@ -1201,14 +1201,14 @@ export default {
 }
 
 .bar-count {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: #fff;
   text-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
 }
 
 .bar-label {
-  font-size: 12px;
+  font-size: 14px;
   color: #cbd5e1;
   text-align: center;
   word-break: keep-all;
@@ -1253,7 +1253,7 @@ export default {
 }
 
 .detection-name {
-  font-size: 13px;
+  font-size: 15px;
   color: #cbd5e1;
 }
 
@@ -1268,7 +1268,7 @@ export default {
   padding: 40px 20px;
   text-align: center;
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 /* 最近事件列表 */
@@ -1310,7 +1310,7 @@ export default {
 }
 
 .event-time {
-  font-size: 11px;
+  font-size: 13px;
   color: #64b5f6;
   white-space: nowrap;
   min-width: 80px;
@@ -1328,12 +1328,12 @@ export default {
 }
 
 .event-desc {
-  font-size: 12px;
+  font-size: 14px;
   color: #94a3b8;
 }
 
 .event-status {
-  font-size: 11px;
+  font-size: 13px;
   padding: 4px 8px;
   border-radius: 4px;
   white-space: nowrap;

@@ -701,7 +701,7 @@ export default {
   border: none;
   outline: none;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .search-input::placeholder {
@@ -714,7 +714,7 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: 10px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -740,7 +740,7 @@ export default {
   border-radius: 10px;
   color: #e2e8f0;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -772,7 +772,7 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.2);
   border-radius: 10px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
   user-select: none;
@@ -828,7 +828,7 @@ export default {
 .option-item {
   padding: 10px 16px;
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   transition: all 0.2s;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
@@ -905,7 +905,7 @@ export default {
   padding: 14px 16px;
   text-align: left;
   color: #ef4444;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -924,7 +924,7 @@ export default {
 .alarm-table td {
   padding: 14px 16px;
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -951,7 +951,7 @@ export default {
 
 .datetime-text {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .category-badge,
@@ -1038,7 +1038,7 @@ export default {
   padding: 6px 12px;
   border-radius: 6px;
   border: none;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1103,7 +1103,7 @@ export default {
 
 .pagination-info {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .pagination-controls {
@@ -1119,7 +1119,7 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
-  font-size: 16px;
+  font-size: 18px;
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex;
@@ -1145,7 +1145,7 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
   color: #e2e8f0;
-  font-size: 13px;
+  font-size: 15px;
   outline: none;
 }
 
@@ -1155,12 +1155,12 @@ export default {
 
 .pagination-separator {
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .total-pages {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 /* 模态框 - 复用UserManagement样式 */
@@ -1255,14 +1255,14 @@ export default {
 
 .info-label {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   min-width: 80px;
 }
 
 .info-value {
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   flex: 1;
 }
 
@@ -1273,7 +1273,7 @@ export default {
 .form-label {
   display: block;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   margin-bottom: 8px;
 }
@@ -1285,7 +1285,7 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   transition: all 0.3s ease;
 }
@@ -1306,7 +1306,7 @@ export default {
 .modal-btn {
   padding: 10px 20px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -1353,7 +1353,7 @@ export default {
 
 .detail-label {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -1361,7 +1361,7 @@ export default {
 
 .detail-value {
   color: #e2e8f0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .alarm-image {
