@@ -151,73 +151,101 @@
           </div>
         </div>
         <div class="panel-group analysis-panel-group" v-show="currentMode === 'analysis'">
-          <div class="panel-section analysis-filter-panel">
-            <div class="panel-header">
-              <h3 class="panel-title">检测类型</h3>
-            </div>
-            <div class="panel-body analysis-filter-body">
-              <div class="detect-type-grid">
-                <button
-                  v-for="type in detectTypes"
-                  :key="type.code"
-                  class="detect-type-item"
-                  :class="{ active: selectedDetectType?.code === type.code }"
-                  @click="handleDetectTypeSelect(type)"
-                >
-                  <span class="detect-type-name">{{ type.name }}</span>
-                  <span class="detect-type-code">{{ type.code }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div class="panel-section analysis-wayline-panel">
-            <div class="panel-header">
-              <h3 class="panel-title">航线列表</h3>
-              <button
-                class="panel-action"
-                :disabled="analysisWaylineLoading || !selectedDetectType"
-                @click="loadAnalysisWaylines"
+          <div class="analysis-step-shell">
+            <transition :name="analysisTransitionName">
+              <div
+                v-if="analysisStep === 1"
+                key="analysis-step-1"
+                class="panel-section analysis-step-panel analysis-filter-panel"
               >
-                {{ analysisWaylineLoading ? '加载中...' : '刷新' }}
-              </button>
-            </div>
-            <div class="panel-body analysis-wayline-body">
-              <div v-if="!selectedDetectType" class="panel-placeholder">请选择检测类型</div>
-              <div v-else-if="analysisWaylineLoading && analysisWaylines.length === 0" class="panel-placeholder">正在加载航线...</div>
-              <div v-else-if="analysisWaylineError" class="panel-placeholder error">{{ analysisWaylineError }}</div>
-              <div v-else-if="analysisWaylines.length === 0" class="panel-placeholder">暂无航线数据</div>
-              <ul v-else class="analysis-wayline-list">
-                <li
-                  v-for="wayline in analysisWaylines"
-                  :key="wayline.id || wayline.wayline_id"
-                  class="analysis-wayline-item"
-                  :class="{ active: isAnalysisWaylineSelected(wayline) }"
-                  @click="handleAnalysisWaylineSelected(wayline)"
-                >
-                  <div class="analysis-wayline-title">{{ wayline.name || wayline.wayline_name || '未命名航线' }}</div>
-                  <div class="analysis-wayline-meta">
-                    <span class="analysis-wayline-id">ID {{ wayline.wayline_id || wayline.id || '--' }}</span>
-                    <span class="analysis-wayline-type">{{ getDetectTypeLabel(wayline.detect_type) }}</span>
+                <div class="panel-header">
+                  <h3 class="panel-title">检测类型</h3>
+                </div>
+                <div class="panel-body analysis-filter-body">
+                  <div class="detect-type-grid">
+                    <button
+                      v-for="type in detectTypes"
+                      :key="type.code"
+                      class="detect-type-item"
+                      :class="{ active: selectedDetectType?.code === type.code }"
+                      @click="handleDetectTypeSelect(type)"
+                    >
+                      <span class="detect-type-name">{{ type.name }}</span>
+                      <span class="detect-type-code">{{ type.code }}</span>
+                    </button>
                   </div>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div class="panel-section analysis-alarm-panel">
-            <div class="panel-body alarm-panel-body">
-              <AlarmPanel
-                v-if="selectedWayline"
-                :alarms="getFilteredAlarms()"
-                :loading="loadingAlarms"
-                @refresh="handleAlarmRefresh"
-                @view-detail="handleViewAlarmDetail"
-                @process-alarm="handleProcessAlarm"
-                @locate-alarm="handleLocateAlarm"
-              />
-              <div v-else class="dji-placeholder">
-                <p>请先选择航线查看告警信息</p>
+                </div>
               </div>
-            </div>
+              <div
+                v-else-if="analysisStep === 2"
+                key="analysis-step-2"
+                class="panel-section analysis-step-panel analysis-wayline-panel"
+              >
+                <div class="panel-header">
+                  <h3 class="panel-title">航线列表</h3>
+                  <div class="panel-header-actions">
+                    <button class="panel-action panel-back-action" @click="goToPreviousAnalysisStep">返回</button>
+                    <button
+                      class="panel-action"
+                      :disabled="analysisWaylineLoading || !selectedDetectType"
+                      @click="loadAnalysisWaylines"
+                    >
+                      {{ analysisWaylineLoading ? '加载中...' : '刷新' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="panel-body analysis-wayline-body">
+                  <div v-if="!selectedDetectType" class="panel-placeholder">请选择检测类型</div>
+                  <div v-else-if="analysisWaylineLoading && analysisWaylines.length === 0" class="panel-placeholder">正在加载航线...</div>
+                  <div v-else-if="analysisWaylineError" class="panel-placeholder error">{{ analysisWaylineError }}</div>
+                  <div v-else-if="analysisWaylines.length === 0" class="panel-placeholder">暂无航线数据</div>
+                  <ul v-else class="analysis-wayline-list">
+                    <li
+                      v-for="wayline in analysisWaylines"
+                      :key="wayline.id || wayline.wayline_id"
+                      class="analysis-wayline-item"
+                      :class="{ active: isAnalysisWaylineSelected(wayline) }"
+                      @click="handleAnalysisWaylineSelected(wayline)"
+                    >
+                      <div class="analysis-wayline-title">{{ wayline.name || wayline.wayline_name || '未命名航线' }}</div>
+                      <div class="analysis-wayline-meta">
+                        <span class="analysis-wayline-id">ID {{ wayline.wayline_id || wayline.id || '--' }}</span>
+                        <span class="analysis-wayline-type">{{ getDetectTypeLabel(wayline.detect_type) }}</span>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+              <div
+                v-else
+                key="analysis-step-3"
+                class="panel-section analysis-step-panel analysis-alarm-panel"
+              >
+                <div class="panel-header">
+                  <h3 class="panel-title">告警面板</h3>
+                  <div class="panel-header-actions">
+                    <span v-if="selectedWayline" class="wayline-badge">
+                      {{ selectedWayline.name || selectedWayline.wayline_name || '当前航线' }}
+                    </span>
+                    <button class="panel-action panel-back-action" @click="goToPreviousAnalysisStep">返回</button>
+                  </div>
+                </div>
+                <div class="panel-body alarm-panel-body">
+                  <AlarmPanel
+                    v-if="selectedWayline"
+                    :alarms="getFilteredAlarms()"
+                    :loading="loadingAlarms"
+                    @refresh="handleAlarmRefresh"
+                    @view-detail="handleViewAlarmDetail"
+                    @process-alarm="handleProcessAlarm"
+                    @locate-alarm="handleLocateAlarm"
+                  />
+                  <div v-else class="dji-placeholder">
+                    <p>请先选择航线查看告警信息</p>
+                  </div>
+                </div>
+              </div>
+            </transition>
           </div>
         </div>
       </div>
@@ -505,6 +533,8 @@ export default {
         { name: '保护区', code: 'protected_area', icon: '🛡️', keywords: 'protected_area, 保护区' }
       ],
       currentMode: 'monitor',
+      analysisStep: 1,
+      analysisTransitionName: 'slide-left',
       selectedDetectType: null,
       analysisWaylines: [],
       analysisWaylineLoading: false,
@@ -1515,6 +1545,19 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
         this.viewer.scene.globe.show = this.globeVisible;
       }
     },
+    setAnalysisStep(step) {
+      const normalizedStep = Math.min(3, Math.max(1, Number(step) || 1));
+      if (normalizedStep === this.analysisStep) return;
+      this.analysisTransitionName = normalizedStep > this.analysisStep ? 'slide-left' : 'slide-right';
+      this.analysisStep = normalizedStep;
+    },
+    resetAnalysisStep() {
+      this.analysisTransitionName = 'slide-left';
+      this.analysisStep = 1;
+    },
+    goToPreviousAnalysisStep() {
+      this.setAnalysisStep(this.analysisStep - 1);
+    },
     setMode(mode) {
       if (!mode || this.currentMode === mode) return;
       this.clearDigitalTwinAndAlarms();
@@ -1523,6 +1566,7 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
         this.viewer.trackedEntity = undefined;
       }
       if (mode === 'analysis') {
+        this.resetAnalysisStep();
         return;
       }
       this.applyCameraMode(true);
@@ -1541,6 +1585,7 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
     },
     handleDetectTypeSelect(type) {
       if (!type) return;
+      this.setAnalysisStep(2);
       if (this.selectedDetectType?.code === type.code) return;
       this.selectedDetectType = type;
       this.analysisWaylines = [];
@@ -1593,6 +1638,7 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
     },
     async handleAnalysisWaylineSelected(wayline) {
       if (!wayline) return;
+      this.setAnalysisStep(3);
       let target = wayline;
       if (!target.id && target.wayline_id) {
         try {
@@ -4330,20 +4376,46 @@ getAlarmPosition(alarm) {
 }
 
 .analysis-panel-group {
+  position: relative;
   min-height: 0;
 }
 
-.analysis-filter-panel {
-  flex: 0 0 auto;
+.analysis-step-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.analysis-step-panel {
+  position: absolute;
+  inset: 0;
+  will-change: transform, opacity;
 }
 
 .analysis-filter-body {
   padding: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.panel-back-action {
+  min-width: 56px;
 }
 
 .detect-type-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -4451,6 +4523,25 @@ getAlarmPosition(alarm) {
 .analysis-alarm-panel {
   flex: 1 1 0;
   min-height: 0;
+}
+
+.slide-left-enter-active,
+.slide-left-leave-active,
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.28s ease, opacity 0.28s ease;
+}
+
+.slide-left-enter-from,
+.slide-right-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.slide-left-leave-to,
+.slide-right-enter-from {
+  transform: translateX(-100%);
+  opacity: 0;
 }
 
 .alarm-panel-body {
