@@ -453,7 +453,7 @@ import flightTaskInfoApi from '../api/flightTaskInfoApi.js'
 import flightTaskApi from '../api/flightTaskApi.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const CESIUM_TARGET_FRAME_RATE = 30
+const CESIUM_TARGET_FRAME_RATE = 60
 const CESIUM_MAX_RENDER_TIME_CHANGE = 1 / CESIUM_TARGET_FRAME_RATE
 const DRONE_POSITION_PAGE_SIZE = 2
 const DRONE_SAMPLE_RETENTION_SECONDS = 20
@@ -800,7 +800,7 @@ export default {
         // 'models/site_model/part1_terrain/tileset.json',
         // 'models/site_model/part2_poles/tileset.json',
         // 'models/site_model/part3_lines/tileset.json'
-        'models/site_model/oldmodel/tileset.json'
+        'models/site_model/model/tileset.json'
       ].map(path => this.resolveAssetPath(path))
     },
     waitForNextFrame() {
@@ -830,30 +830,20 @@ async loadSiteModelTilesets(Cesium) {
       const loadPromises = modelUrls.map(async url => {
         try {
           return await Cesium.Cesium3DTileset.fromUrl(url, {
-            // ---------------- 性能优化参数开始 ----------------
-            
-            // 1. 调大屏幕空间误差 (SSE)
-            // 默认值是 16。调大这个值（如 32 或 48），Cesium 会更倾向于渲染低层级（较模糊）的瓦片，从而大幅减少 Draw Calls 和渲染压力。
-            // 如果你觉得 32 还是卡，可以改为 48 或 64；如果觉得太模糊，可以改回 24。
-            maximumScreenSpaceError: 8, 
-            
-            // 2. 提高最大内存使用量 (单位 MB)
-            // 默认值是 512。因为你现在有 3 个模型，内存很容易爆满导致频繁触发垃圾回收（掉帧）。
-            // 提高到 1024 或 2048，可以允许显存缓存更多瓦片，减少重复加载的卡顿。
-            maximumMemoryUsage: 4096,    
-            
-            // 3. 开启动态屏幕空间误差
-            // 开启后，当相机快速移动或者视距较远时，会自动降低模型精度，防止拖拽视角时卡死。
-            dynamicScreenSpaceError: true, 
+            // ---------------- 性能与流畅度优化 ----------------
+            // 1. 恢复到 16 黄金比例（之前是 8，太吃性能了）
+            maximumScreenSpaceError: 12, 
+            // 2. 限制显存上限为 3GB，给系统和直播留出空间
+            maximumMemoryUsage: 3072,    
+            cullRequestsWhileMoving: false,
+            dynamicScreenSpaceError: false,
             dynamicScreenSpaceErrorDensity: 0.00278,
             dynamicScreenSpaceErrorFactor: 4.0,
             dynamicScreenSpaceErrorHeightFalloff: 0.25,
-            
-            // 4. 原有的优化参数保持不变
+            preferLeaves: true,                 // 【关键】直接优先请求最高精度的“叶子”节点
+            preloadWhenHidden: true,            // 允许在后台提前静默加载，防止视角转过去时是空白
             skipLevelOfDetail: true,
             cullWithChildrenBounds: true
-            
-            // ---------------- 性能优化参数结束 ----------------
           })
         } catch (error) {
           throw new Error(`模型加载失败: ${url}，${error.message}`)
@@ -877,6 +867,7 @@ async loadSiteModelTilesets(Cesium) {
         return tilesets
       }
 
+      // 整体底图的高度下沉（适应真实海拔）
       const heightOffset = -40.2
       const boundingSphere = mainTileset.boundingSphere
       const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center)
@@ -888,6 +879,29 @@ async loadSiteModelTilesets(Cesium) {
       tilesets.forEach(tileset => {
         tileset.modelMatrix = modelMatrix
       })
+
+      // ---------------- 解决杆子闪烁的核心代码 ----------------
+      try {
+        // 根据 tileset.json，"杆"模型是第二个子节点 (children[1])
+        if (mainTileset.root && mainTileset.root.children && mainTileset.root.children.length > 1) {
+          const poleNode = mainTileset.root.children[1]; 
+          
+          // 给“杆”单独加一个向上的微小偏移量（0.2米）
+          // 这样它就会刚好浮在倾斜模型自带的杆子表面之上，打破深度冲突
+          const poleOffset = Cesium.Cartesian3.fromElements(0, 0, 0.2); 
+          const poleTranslation = Cesium.Matrix4.fromTranslation(poleOffset);
+          
+          // 应用变换矩阵
+          poleNode.transform = Cesium.Matrix4.multiply(
+            poleNode.transform, 
+            poleTranslation, 
+            new Cesium.Matrix4()
+          );
+        }
+      } catch (e) {
+        console.warn('处理杆模型高度偏移时出错:', e);
+      }
+      // --------------------------------------------------------
 
       this.tilesets = tilesets
       this.viewer.scene.requestRender()
@@ -928,7 +942,7 @@ async loadSiteModelTilesets(Cesium) {
           requestRenderMode: true,
           maximumRenderTimeChange: CESIUM_MAX_RENDER_TIME_CHANGE,
           targetFrameRate: CESIUM_TARGET_FRAME_RATE,
-          msaaSamples: 4,
+          msaaSamples: 2,
           useBrowserRecommendedResolution: true,
         })
         // 开启自带的帧率和渲染耗时监控
