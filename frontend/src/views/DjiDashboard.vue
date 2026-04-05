@@ -832,7 +832,7 @@ async loadSiteModelTilesets(Cesium) {
           return await Cesium.Cesium3DTileset.fromUrl(url, {
             // ---------------- 性能与流畅度优化 ----------------
             // 1. 恢复到 16 黄金比例（之前是 8，太吃性能了）
-            maximumScreenSpaceError: 12, 
+            maximumScreenSpaceError: 10, 
             // 2. 限制显存上限为 3GB，给系统和直播留出空间
             maximumMemoryUsage: 3072,    
             cullRequestsWhileMoving: false,
