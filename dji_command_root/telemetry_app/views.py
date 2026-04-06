@@ -2954,6 +2954,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         """
         stream_id = request.data.get('stream_id', 'drone01')
         interval = float(request.data.get('interval', 3.0))
+        wayline_uuid = str(request.data.get('wayline_uuid') or request.data.get('wayline_id') or '').strip()
 
         # 🔥 使用线程锁，防止并发启动多个线程
         with live_monitor_lock:
@@ -2972,7 +2973,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                 # 这样即使线程立即失败，记录也存在，可以正常停止
                 monitor_thread = threading.Thread(
                     target=self._run_monitor,
-                    args=(stream_id, interval, stop_event),
+                    args=(stream_id, interval, stop_event, wayline_uuid),
                     daemon=True,
                     name=f"Monitor-{stream_id}"
                 )
@@ -2982,7 +2983,8 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                     "thread": monitor_thread,
                     "stop_event": stop_event,
                     "task": None,  # 初始为None，线程内会更新
-                    "started_at": django_timezone.now().isoformat()
+                    "started_at": django_timezone.now().isoformat(),
+                    "wayline_uuid": wayline_uuid
                 }
 
                 print(f"✅ [线程记录] Stream: {stream_id} | 已记录到 live_monitor_threads")
@@ -2996,6 +2998,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                     "message": f"直播监听已启动: {stream_id}",
                     "stream_id": stream_id,
                     "interval": interval,
+                    "wayline_uuid": wayline_uuid,
                     "task_id": None  # 任务ID会在首帧成功后创建
                 })
 
@@ -3141,7 +3144,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                 "count": len(status_list)
             })
 
-    def _run_monitor(self, stream_id, interval, stop_event):
+    def _run_monitor(self, stream_id, interval, stop_event, wayline_uuid=''):
         """
         监听主逻辑（在独立线程中运行）
         """
@@ -3149,10 +3152,20 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         ZLM_API_HOST = "http://zlm:80"
         ZLM_SECRET = "123456"  # 🔥 修复：与docker-compose中ZLM配置一致
         bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+        target_wayline = None
+        normalized_wayline_uuid = str(wayline_uuid or '').strip()
+        if normalized_wayline_uuid:
+            target_wayline = Wayline.objects.filter(wayline_id=normalized_wayline_uuid).first()
+            if not target_wayline and normalized_wayline_uuid.isdigit():
+                target_wayline = Wayline.objects.filter(pk=int(normalized_wayline_uuid)).first()
 
         print(f"🚀 [监听启动] Stream: {stream_id} | 等待首帧截图...")
         print(f"📡 [ZLM配置] {ZLM_API_HOST} | secret: {ZLM_SECRET[:8]}...")
         print(f"📦 [MinIO配置] bucket: {bucket_name}")
+        if target_wayline:
+            print(f"🧭 [航线绑定] wayline_uuid={normalized_wayline_uuid} -> {target_wayline.name}")
+        elif normalized_wayline_uuid:
+            print(f"⚠️ [航线绑定] 未找到航线: {normalized_wayline_uuid}")
 
         # 🔥 新增：启动时测试MinIO连接
         try:
@@ -3318,6 +3331,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                             dji_task_name=dji_task_name,  # 🔥 新增：用户友好的任务名称
                             bucket=bucket_name,
                             prefix_list=[virtual_prefix],
+                            wayline=target_wayline,
                             detect_category=category,
                             detect_status="processing"  # 直播任务立即开始检测
                         )

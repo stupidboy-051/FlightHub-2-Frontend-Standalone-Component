@@ -419,7 +419,7 @@ const SERIES_COLORS = [
 ]
 
 const TYPE_NAME_MAP = {
-  rail: '铁路',
+  rail: '轨道',
   contactline: '接触网',
   bridge: '桥梁',
   protected_area: '保护区'

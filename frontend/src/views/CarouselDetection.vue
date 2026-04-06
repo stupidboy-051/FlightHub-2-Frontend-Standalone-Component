@@ -3138,6 +3138,10 @@ export default {
   font-weight: 500;
   text-align: right;
   max-width: 60%;
+  display: inline-block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .info-controls-grid {

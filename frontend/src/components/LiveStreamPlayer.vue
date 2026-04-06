@@ -125,6 +125,10 @@ export default {
       type: String,
       default: ''
     },
+    waylineUuid: {
+      type: String,
+      default: ''
+    },
     // 流名称显示
     streamName: {
       type: String,
@@ -535,7 +539,7 @@ export default {
     async startMonitor() {
       this.monitorLoading = true
       try {
-        const response = await liveMonitorApi.startMonitor(this.streamId, 3.0)
+        const response = await liveMonitorApi.startMonitor(this.streamId, 3.0, this.waylineUuid)
         console.log('✅ 监听已启动:', response)
 
         this.isMonitoring = true

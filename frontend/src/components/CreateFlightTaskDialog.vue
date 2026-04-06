@@ -41,7 +41,7 @@
             @change="handleWaylineTypeChange"
           >
             <el-option label="全部" value="all"></el-option>
-            <el-option label="铁路" value="rail"></el-option>
+            <el-option label="轨道" value="rail"></el-option>
             <el-option label="接触网" value="contactline"></el-option>
             <el-option label="桥梁" value="bridge"></el-option>
             <el-option label="保护区" value="protected_area"></el-option>
