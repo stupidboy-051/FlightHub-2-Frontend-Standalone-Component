@@ -842,16 +842,20 @@ async loadSiteModelTilesets(Cesium) {
             // 1. 恢复到 16 黄金比例（之前是 8，太吃性能了）
             maximumScreenSpaceError: 10, 
             // 2. 限制显存上限为 3GB，给系统和直播留出空间
-            maximumMemoryUsage: 3072,    
+            maximumMemoryUsage: 3072,   
+            cullWithChildrenBounds: true, 
             cullRequestsWhileMoving: false,
-            dynamicScreenSpaceError: false,
-            dynamicScreenSpaceErrorDensity: 0.00278,
-            dynamicScreenSpaceErrorFactor: 4.0,
-            dynamicScreenSpaceErrorHeightFalloff: 0.25,
+            dynamicScreenSpaceError: true,
+            dynamicScreenSpaceErrorDensity: 0.00200,
+            dynamicScreenSpaceErrorFactor: 1.0,
+            dynamicScreenSpaceErrorHeightFalloff: 0.3,
             preferLeaves: true,                 // 【关键】直接优先请求最高精度的“叶子”节点
             preloadWhenHidden: true,            // 允许在后台提前静默加载，防止视角转过去时是空白
             skipLevelOfDetail: true,
-            cullWithChildrenBounds: true
+            baseScreenSpaceError: 1024,
+            skipScreenSpaceErrorFactor: 16,
+            skipLevels: 1,
+            preloadAncestors: true,
           })
         } catch (error) {
           throw new Error(`模型加载失败: ${url}，${error.message}`)
