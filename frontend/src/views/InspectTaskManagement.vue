@@ -127,4 +127,26 @@ export default {
   flex-direction: column;
   min-height: 0;
 }
+
+/* 与告警管理页保持一致：表格正文 17px，次级信息与操作 14px */
+.task-content :deep(.task-table th),
+.task-content :deep(.task-table td) {
+  font-size: 17px;
+}
+
+.task-content :deep(.datetime-text),
+.task-content :deep(.category-badge),
+.task-content :deep(.status-badge),
+.task-content :deep(.clean-badge),
+.task-content :deep(.device-badge),
+.task-content :deep(.text-muted),
+.task-content :deep(.action-btn) {
+  font-size: 14px;
+}
+
+/* 创建时间单独对齐用户要求：更大且白色 */
+.task-content :deep(.datetime-text) {
+  font-size: 17px !important;
+  color: #ffffff !important;
+}
 </style>

@@ -34,7 +34,7 @@
         </div>
         <div v-show="activeDropdown === 'category'" class="custom-select-options">
           <div class="option-item" :class="{ 'is-selected': categoryFilter === '' }" @click="selectCategory('')">全部类型</div>
-          <div class="option-item" :class="{ 'is-selected': categoryFilter === 'rail' }" @click="selectCategory('rail')">铁路检测</div>
+          <div class="option-item" :class="{ 'is-selected': categoryFilter === 'rail' }" @click="selectCategory('rail')">轨道检测</div>
           <div class="option-item" :class="{ 'is-selected': categoryFilter === 'contactline' }" @click="selectCategory('contactline')">接触网检测</div>
           <div class="option-item" :class="{ 'is-selected': categoryFilter === 'bridge' }" @click="selectCategory('bridge')">桥梁检测</div>
           <div class="option-item" :class="{ 'is-selected': categoryFilter === 'protected_area' }" @click="selectCategory('protected_area')">保护区检测</div>
@@ -952,7 +952,7 @@ export default {
       if (!categoryValue) return ''
       if (typeof categoryValue !== 'string') return ''
       const categoryMap = {
-        'rail': '铁路检测',
+        'rail': '轨道检测',
         'contactline': '接触网检测',
         'bridge': '桥梁检测',
         'protected_area': '保护区检测',

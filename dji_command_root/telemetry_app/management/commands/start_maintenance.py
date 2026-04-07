@@ -2,10 +2,19 @@ import time
 import datetime
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from django.db import close_old_connections
+from django.db.utils import OperationalError
 from telemetry_app.models import DronePosition
 
 class Command(BaseCommand):
     help = '每日维护服务：清理过期无人机位置数据（分批处理）'
+    RETRYABLE_DB_ERROR_KEYWORDS = (
+        "server has gone away",
+        "lost connection",
+        "can't connect to server",
+        "connection refused",
+        "broken pipe",
+    )
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS('🚀 [Maintenance] 每日维护服务启动...'))
@@ -44,6 +53,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("🔄 开始执行每日维护任务..."))
         
         try:
+            # 每次任务开始先清理失效连接，避免复用到已断开的长连接。
+            close_old_connections()
+
             # --- 任务: 分批清理过期无人机位置数据 ---
             # 逻辑：保留最近 7 天的数据，每次清理 5000 条
             retention_days = 7
@@ -58,9 +70,12 @@ class Command(BaseCommand):
             while True:
                 # 1. 获取一批要删除的 ID
                 # 注意：values_list + limit 是高效的获取 ID 方式
-                delete_ids = list(
-                    DronePosition.objects.filter(timestamp__lt=cutoff_date)
-                    .values_list('id', flat=True)[:batch_size]
+                delete_ids = self._run_db_op_with_retry(
+                    operation_name="查询待删除ID",
+                    operation=lambda: list(
+                        DronePosition.objects.filter(timestamp__lt=cutoff_date)
+                        .values_list('id', flat=True)[:batch_size]
+                    ),
                 )
                 
                 if not delete_ids:
@@ -70,7 +85,10 @@ class Command(BaseCommand):
                 count_to_delete = len(delete_ids)
                 
                 # 2. 根据 ID 执行删除
-                DronePosition.objects.filter(id__in=delete_ids).delete()
+                self._run_db_op_with_retry(
+                    operation_name="批量删除",
+                    operation=lambda: DronePosition.objects.filter(id__in=delete_ids).delete(),
+                )
                 
                 total_deleted += count_to_delete
                 self.stdout.write(f"   - 已删除本批次 {count_to_delete} 条记录 (累计: {total_deleted})")
@@ -84,3 +102,22 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"❌ 维护任务执行出错: {str(e)}"))
         
         self.stdout.write("--------------------------------------------------")
+
+    def _run_db_op_with_retry(self, operation_name, operation, max_retries=3, base_delay=1.0):
+        for attempt in range(1, max_retries + 1):
+            try:
+                close_old_connections()
+                return operation()
+            except OperationalError as exc:
+                error_text = str(exc).lower()
+                retryable = any(keyword in error_text for keyword in self.RETRYABLE_DB_ERROR_KEYWORDS)
+                if not retryable or attempt == max_retries:
+                    raise
+                backoff_seconds = base_delay * (2 ** (attempt - 1))
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"⚠️ {operation_name} 发生数据库断连，准备第 {attempt + 1}/{max_retries} 次重试，"
+                        f"{backoff_seconds:.1f} 秒后继续。错误: {exc}"
+                    )
+                )
+                time.sleep(backoff_seconds)

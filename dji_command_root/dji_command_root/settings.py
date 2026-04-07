@@ -89,6 +89,14 @@ if os.environ.get("DB_ENGINE"):
         "PASSWORD": os.environ.get("DB_PASSWORD", "root"),
         "HOST": os.environ.get("DB_HOST", "db"),
         "PORT": os.environ.get("DB_PORT", "3306"),
+        # 减少复用过期连接导致的 "server has gone away"
+        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {
+            "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
+            "read_timeout": int(os.environ.get("DB_READ_TIMEOUT", "30")),
+            "write_timeout": int(os.environ.get("DB_WRITE_TIMEOUT", "30")),
+        },
     }
 
 AUTH_PASSWORD_VALIDATORS = [
