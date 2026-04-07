@@ -361,6 +361,7 @@
                 :stream-id="currentLiveStreamId"
                 :stream-name="currentLiveStreamName"
                 :stream-url-override="currentLiveStreamUrl"
+                :wayline-uuid="selectedMonitorWaylineUuid"
                 :zlm-server="zlmServerUrl"
                 :auto-play="true"
             />
@@ -641,6 +642,13 @@ export default {
         return this.selectedDock?.drone_sn || this.selectedDock?.dock_sn || ''
       }
       return this.selectedDock?.dock_sn || ''
+    },
+    selectedMonitorWaylineUuid() {
+      const selectedWaylineUuid = String(this.selectedWayline?.wayline_id || '').trim()
+      if (selectedWaylineUuid) {
+        return selectedWaylineUuid
+      }
+      return String(this.currentWaylineUuid || '').trim()
     },
     monitorAlarmPanelVisible() {
       return this.currentMode === 'monitor' && this.isProtectedAreaTask && Boolean(this.currentTaskUuid)
@@ -3226,7 +3234,8 @@ isDroneWorking(dock) {
         if (!this.selectedWayline || String(this.selectedWayline.id) !== String(waylineId)) {
           return;
         }
-        this.alarms = Array.isArray(response) ? response : (response.results || []);
+        const list = Array.isArray(response) ? response : (response.results || []);
+        this.alarms = this.normalizeAlarmList(list);
         this.plotAlarmMarkers(this.alarms);
       } catch (error) {
         console.error('获取告警信息失败:', error);

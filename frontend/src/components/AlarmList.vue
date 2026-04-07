@@ -34,7 +34,7 @@
         </div>
         <div v-show="activeDropdown === 'type'" class="custom-select-options">
           <div class="option-item" :class="{ 'is-selected': detectTypeFilter === '' }" @click="selectDetectType('')">全部检测类型</div>
-          <div class="option-item" :class="{ 'is-selected': detectTypeFilter === 'rail' }" @click="selectDetectType('rail')">铁路</div>
+          <div class="option-item" :class="{ 'is-selected': detectTypeFilter === 'rail' }" @click="selectDetectType('rail')">轨道</div>
           <div class="option-item" :class="{ 'is-selected': detectTypeFilter === 'contactline' }" @click="selectDetectType('contactline')">接触网</div>
           <div class="option-item" :class="{ 'is-selected': detectTypeFilter === 'bridge' }" @click="selectDetectType('bridge')">桥梁</div>
           <div class="option-item" :class="{ 'is-selected': detectTypeFilter === 'protected_area' }" @click="selectDetectType('protected_area')">保护区</div>
@@ -88,10 +88,10 @@
           <tr>
             <th width="150">航线名称</th>
             <th width="150" class="text-center">时间</th>
-            <th width="120" class="text-center">类型</th>
-            <th>描述</th>
+            <th width="130" class="text-center">类型</th>
+            <th width="240" class="description-header">描述</th>
             <th width="180">位置</th>
-            <th width="100" class="text-center">状态</th>
+            <th width="120" class="text-center">状态</th>
             <th width="180" class="text-center">操作</th>
           </tr>
         </thead>
@@ -100,7 +100,7 @@
             <td colspan="7" class="empty-row">暂无告警数据</td>
           </tr>
           <tr v-for="alarm in filteredAlarms" :key="alarm.id" class="alarm-row">
-            <td>
+            <td class="wayline-cell">
               <el-tooltip :content="getWaylineName(alarm)" placement="top" effect="dark" :show-after="300">
                 <span class="wayline-name-ellipsis">{{ getWaylineName(alarm) }}</span>
               </el-tooltip>
@@ -113,9 +113,14 @@
                 {{ alarm.category_name || '未分类' }}
               </span>
             </td>
-            <td class="description-cell">{{ alarm.content }}</td>
+            <td class="description-cell">
+              <el-tooltip v-if="alarm.content" :content="alarm.content" placement="top" effect="dark" :show-after="300">
+                <span class="description-ellipsis">{{ alarm.content }}</span>
+              </el-tooltip>
+              <span v-else class="description-ellipsis">--</span>
+            </td>
             <td>坐标({{ alarm.latitude || '--' }}, {{ alarm.longitude || '--' }})</td>
-            <td class="text-center">
+            <td class="text-center status-cell">
               <span class="status-badge" :class="`status-${alarm.status.toLowerCase()}`">
                 {{ getStatusText(alarm.status) }}
               </span>
@@ -464,7 +469,7 @@ export default {
     getDetectTypeLabel(type) {
       if (!type) return ''
       const map = {
-        'rail': '铁路',
+        'rail': '轨道',
         'contactline': '接触网',
         'bridge': '桥梁',
         'protected_area': '保护区'
@@ -930,12 +935,26 @@ export default {
   text-overflow: ellipsis;
 }
 
+.alarm-table td.wayline-cell {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.alarm-table td.status-cell {
+  padding-left: 10px;
+  padding-right: 10px;
+  text-overflow: clip;
+}
+
 .wayline-name-ellipsis {
   display: inline-block;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   cursor: help;
 }
 
@@ -1010,11 +1029,25 @@ export default {
   border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
+.description-header {
+  width: 240px;
+}
+
 .description-cell {
-  max-width: 200px;
+  width: 240px;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.description-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .empty-row {

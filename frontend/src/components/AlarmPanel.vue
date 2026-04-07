@@ -34,8 +34,8 @@
               <span>{{ alarm.latitude }}, {{ alarm.longitude }}</span>
             </div>
             
-            <div v-if="alarm.image_url" class="alarm-image">
-              <img :src="alarm.image_url" :alt="alarm.content" />
+            <div v-if="getAlarmImageUrl(alarm)" class="alarm-image">
+              <img :src="getAlarmImageUrl(alarm)" :alt="alarm.content || '告警图片'" />
             </div>
             
             <div class="alarm-actions">
@@ -77,11 +77,16 @@ export default {
       })
     },
     
+    getAlarmImageUrl(alarm) {
+      return alarm?.image_url || alarm?.image_signed_url || alarm?.imageUrl || ''
+    },
+
     getAlarmTitle(alarm) {
       if (alarm.category_details && alarm.category_details.name) {
         return alarm.category_details.name
       }
-      return alarm.content ? alarm.content.substring(0, 30) + (alarm.content.length > 30 ? '...' : '') : '未知告警'
+      if (alarm.category_name) return alarm.category_name
+      return '报警'
     },
     
     handleRefresh() {

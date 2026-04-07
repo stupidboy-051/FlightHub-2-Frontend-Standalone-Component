@@ -35,11 +35,16 @@ export default {
    * @param {string} streamId - 流ID (例如: drone01)
    * @param {number} interval - 截图间隔(秒)
    */
-  async startMonitor(streamId, interval = 3.0) {
-    return api.post('/live-monitor/start/', {
+  async startMonitor(streamId, interval = 3.0, waylineUuid = '') {
+    const payload = {
       stream_id: streamId,
       interval
-    })
+    }
+    const normalizedWaylineUuid = String(waylineUuid || '').trim()
+    if (normalizedWaylineUuid) {
+      payload.wayline_uuid = normalizedWaylineUuid
+    }
+    return api.post('/live-monitor/start/', payload)
   },
 
   /**

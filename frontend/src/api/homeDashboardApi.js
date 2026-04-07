@@ -21,7 +21,7 @@ const SERIES_COLORS = [
 ]
 
 const DETECT_TYPE_MAP = {
-  rail: '铁路',
+  rail: '轨道',
   contactline: '接触网',
   bridge: '桥梁',
   protected_area: '保护区'
@@ -197,7 +197,7 @@ function resolveDetectTypeKey(alarm) {
       if (aliases.includes(code)) return key
     }
     const normalizedCode = code.replace(/\s+/g, '')
-    if (normalizedCode.includes('铁路')) return 'rail'
+    if (normalizedCode.includes('铁路') || normalizedCode.includes('轨道')) return 'rail'
     if (normalizedCode.includes('接触网') || normalizedCode.includes('接触线')) return 'contactline'
     if (normalizedCode.includes('桥梁')) return 'bridge'
     if (normalizedCode.includes('保护区')) return 'protected_area'
@@ -205,7 +205,7 @@ function resolveDetectTypeKey(alarm) {
   const name = String(rawName || '').trim()
   if (name) {
     const normalized = name.replace(/\s+/g, '')
-    if (normalized.includes('铁路')) return 'rail'
+    if (normalized.includes('铁路') || normalized.includes('轨道')) return 'rail'
     if (normalized.includes('接触网') || normalized.includes('接触线')) return 'contactline'
     if (normalized.includes('桥梁')) return 'bridge'
     if (normalized.includes('保护区')) return 'protected_area'
@@ -794,4 +794,3 @@ export default {
     }
   }
 }
-
