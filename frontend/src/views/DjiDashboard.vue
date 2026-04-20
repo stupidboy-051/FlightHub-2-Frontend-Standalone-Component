@@ -564,8 +564,10 @@ export default {
       previewAlarmImageUrl: '',
       fh2CheckTimer: null,
       componentConfig: null,
-      zlmServerUrl: 'http://192.168.10.10',
-      droneTranscodedUrl: 'http://192.168.10.10/live/drone_fixed.live.mp4',
+      // zlmServerUrl: 'http://192.168.10.10',
+      // droneTranscodedUrl: 'http://192.168.10.10/live/drone_fixed.live.mp4',
+      zlmServerUrl: '', 
+      droneTranscodedUrl: '/live/drone_fixed.live.flv',
       liveStreamType: 'airport',
       showCreateTaskDialog: false,
       commandLoading: {
@@ -808,7 +810,7 @@ export default {
         // 'models/site_model/part1_terrain/tileset.json',
         // 'models/site_model/part2_poles/tileset.json',
         // 'models/site_model/part3_lines/tileset.json'
-        'models/site_model/model/tileset.json'
+        'models/site_model/oldmodel/tileset.json'
       ].map(path => this.resolveAssetPath(path))
     },
     waitForNextFrame() {
