@@ -190,7 +190,7 @@
     </div>
     
     <!-- 父任务详情对话框 -->
-    <Teleport to="body">
+    <Teleport to="#app">
       <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
         <div class="modal-premium detail-modal" :class="isCurrentParentTask ? 'detail-modal--parent' : 'detail-modal--child'">
           <div class="modal-header">

@@ -1220,6 +1220,9 @@ export default {
   box-shadow: 0 16px 64px rgba(0, 0, 0, 0.5), 0 0 40px rgba(239, 68, 68, 0.2);
   width: 100%;
   max-width: 500px;
+  max-height: min(84vh, 920px);
+  display: flex;
+  flex-direction: column;
   animation: modalSlideIn 0.3s ease;
 }
 
@@ -1277,6 +1280,8 @@ export default {
 
 .modal-body {
   padding: 24px;
+  overflow: auto;
+  min-height: 0;
 }
 
 .info-row {
@@ -1370,7 +1375,7 @@ export default {
 /* 详情网格 */
 .detail-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -1395,6 +1400,8 @@ export default {
 .detail-value {
   color: #e2e8f0;
   font-size: 16px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .alarm-image {

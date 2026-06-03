@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="dashboard-premium">
     <!-- 页面头部 -->
     <div class="dashboard-header">
@@ -381,62 +381,64 @@
     <ImagePreviewModal v-model="showAlarmImagePreview" :url="previewAlarmImageUrl" title="图片预览" />
 
     <!-- 告警详情弹窗 -->
-    <div v-if="showAlarmDetail" class="modal-overlay" @click.self="showAlarmDetail = false">
-      <div class="modal-premium">
-        <div class="modal-header">
-          <h3 class="modal-title">告警详情</h3>
-          <button @click="showAlarmDetail = false" class="modal-close">×</button>
-        </div>
-        <div class="modal-body">
-          <div v-if="currentAlarm" class="detail-grid">
-            <div class="detail-item">
-              <span class="detail-label">告警ID</span>
-              <span class="detail-value">{{ currentAlarm.id }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">告警类型</span>
-              <span class="detail-value">{{ currentAlarm.category_details?.name || '未分类' }}</span>
-            </div>
-            <div class="detail-item full-width">
-              <span class="detail-label">告警描述</span>
-              <span class="detail-value">{{ currentAlarm.content }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">告警时间</span>
-              <span class="detail-value">{{ formatAlarmTime(currentAlarm.created_at) }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">告警位置</span>
-              <span class="detail-value">坐标({{ currentAlarm.latitude }}, {{ currentAlarm.longitude }})</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">航线信息</span>
-              <span class="detail-value">{{ currentAlarm.wayline?.name || currentAlarm.wayline_details?.name || '未知航线' }}</span>
-            </div>
-            <div v-if="currentAlarm.image_signed_url || currentAlarm.image_url" class="detail-item full-width">
-              <span class="detail-label">告警图片</span>
-              <div
-                class="alarm-image"
-                role="button"
-                tabindex="0"
-                @click="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
-                @keydown.enter.prevent="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
-                @keydown.space.prevent="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
-              >
-                <img
-                  :src="currentAlarm.image_signed_url || currentAlarm.image_url"
-                  alt="告警图片"
-                  @error="handleImageError"
-                />
+    <Teleport to="body">
+      <div v-if="showAlarmDetail" class="modal-overlay" @click.self="showAlarmDetail = false">
+        <div class="modal-premium">
+          <div class="modal-header">
+            <h3 class="modal-title">告警详情</h3>
+            <button @click="showAlarmDetail = false" class="modal-close">×</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="currentAlarm" class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-label">告警ID</span>
+                <span class="detail-value">{{ currentAlarm.id }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">告警类型</span>
+                <span class="detail-value">{{ currentAlarm.category_details?.name || '未分类' }}</span>
+              </div>
+              <div class="detail-item full-width">
+                <span class="detail-label">告警描述</span>
+                <span class="detail-value">{{ currentAlarm.content }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">告警时间</span>
+                <span class="detail-value">{{ formatAlarmTime(currentAlarm.created_at) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">告警位置</span>
+                <span class="detail-value">坐标({{ currentAlarm.latitude }}, {{ currentAlarm.longitude }})</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">航线信息</span>
+                <span class="detail-value">{{ currentAlarm.wayline?.name || currentAlarm.wayline_details?.name || '未知航线' }}</span>
+              </div>
+              <div v-if="currentAlarm.image_signed_url || currentAlarm.image_url" class="detail-item full-width">
+                <span class="detail-label">告警图片</span>
+                <div
+                  class="alarm-image"
+                  role="button"
+                  tabindex="0"
+                  @click="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
+                  @keydown.enter.prevent="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
+                  @keydown.space.prevent="openAlarmImagePreview(currentAlarm.image_signed_url || currentAlarm.image_url)"
+                >
+                  <img
+                    :src="currentAlarm.image_signed_url || currentAlarm.image_url"
+                    alt="告警图片"
+                    @error="handleImageError"
+                  />
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <div class="modal-footer">
-          <button @click="showAlarmDetail = false" class="modal-btn secondary-btn">关闭</button>
+          <div class="modal-footer">
+            <button @click="showAlarmDetail = false" class="modal-btn secondary-btn">关闭</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -4844,6 +4846,9 @@ getAlarmPosition(alarm) {
   box-shadow: 0 16px 64px rgba(0, 0, 0, 0.5);
   width: 100%;
   max-width: 700px;
+  max-height: min(84vh, 920px);
+  display: flex;
+  flex-direction: column;
   animation: modalSlideIn 0.3s ease;
 }
 
@@ -4897,11 +4902,13 @@ getAlarmPosition(alarm) {
 
 .modal-body {
   padding: 24px;
+  overflow: auto;
+  min-height: 0;
 }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -4926,6 +4933,8 @@ getAlarmPosition(alarm) {
 .detail-value {
   color: #e2e8f0;
   font-size: 14px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .alarm-image {
