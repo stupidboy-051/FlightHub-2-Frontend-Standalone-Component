@@ -959,7 +959,7 @@ def fetch_dji_task_media(task_uuid):
     base_url = "http://192.168.10.2:30812"
     
     headers = {
-        "X-User-Token": "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiIiwiZXhwIjoyMDgyMzQxNjQzLCJuYmYiOjE3NjY4MDg4NDMsIm9yZ2FuaXphdGlvbl91dWlkIjoiZmJjNGJkY2YtMmFjMC00MmI2LTliMWItZTFkMWUyMDE0NjgyIiwicHJvamVjdF91dWlkIjoiIiwic3ViIjoiZmgyIiwidXNlcl9pZCI6IjE3NjY4MDgyNjMxNjYwODAxNjcifQ.Szehmvkjcmub5csnJQj1r0KjhdXCtkzCSzi31GDjigRn3B7V7TYVqDJ1QJ9-BxkvAl2eSoY3JXaH34ccHW-eaA",
+        "X-User-Token": getattr(settings, "DJI_X_USER_TOKEN", ""),
         "X-Project-Uuid": "d41dc59e-cab1-4798-8f91-faca84ff4cb7",
         "Content-Type": "application/json"
     }
@@ -1730,11 +1730,22 @@ def minio_poller_worker2():
                                 cache.delete_many([miss_count_key, miss_stop_key])
                                 break
                         if not uuid:
-                            miss_count = int(cache.get(miss_count_key, 0)) + 1
-                            cache.set(miss_count_key, miss_count, timeout=uuid_miss_cache_ttl)
+                            # 1. 使用 cache.add 尝试设置初始值并附带 TTL
+                            if cache.add(miss_count_key, 1, timeout=uuid_miss_cache_ttl):
+                                miss_count = 1
+                            else:
+                                # 2. 如果已经存在，则原子递增（不再重置 TTL）
+                                try:
+                                    miss_count = cache.incr(miss_count_key)
+                                except ValueError:
+                                    cache.set(miss_count_key, 1, timeout=uuid_miss_cache_ttl)
+                                    miss_count = 1
+
                             if miss_count >= uuid_miss_max_retries:
-                                cache.set(miss_stop_key, 1, timeout=uuid_miss_cache_ttl)
-                                print(f"⏹️ [Stop Scan] 文件夹 {folder_uuid} 连续 {miss_count} 次无法提取 UUID，停止重复扫描")
+                                # 仅在首次达到阈值或尚未设置时才写入 miss_stop_key，防止重复刷新 TTL
+                                if not cache.get(miss_stop_key):
+                                    cache.set(miss_stop_key, 1, timeout=uuid_miss_cache_ttl)
+                                    print(f"⏹️ [Stop Scan] 文件夹 {folder_uuid} 连续 {miss_count} 次无法提取 UUID，停止重复扫描")
                             else:
                                 print(f"⚠️ [Skip] 无法从 {sample_key or folder_prefix} 提取 UUID ({miss_count}/{uuid_miss_max_retries})")
                             continue
