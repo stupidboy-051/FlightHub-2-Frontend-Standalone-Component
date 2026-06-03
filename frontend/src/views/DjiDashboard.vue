@@ -810,7 +810,7 @@ export default {
         // 'models/site_model/part1_terrain/tileset.json',
         // 'models/site_model/part2_poles/tileset.json',
         // 'models/site_model/part3_lines/tileset.json'
-        'models/site_model/oldmodel/tileset.json'
+        'models/site_model/newmodel/tileset.json'
       ].map(path => this.resolveAssetPath(path))
     },
     waitForNextFrame() {
@@ -836,91 +836,120 @@ export default {
 async loadSiteModelTilesets(Cesium) {
       if (!this.viewer) return []
 
-      const modelUrls = this.getSiteModelUrls()
-      const loadPromises = modelUrls.map(async url => {
-        try {
-          return await Cesium.Cesium3DTileset.fromUrl(url, {
-            // ---------------- 性能与流畅度优化 ----------------
-            // 1. 恢复到 16 黄金比例（之前是 8，太吃性能了）
-            maximumScreenSpaceError: 10, 
-            // 2. 限制显存上限为 3GB，给系统和直播留出空间
-            maximumMemoryUsage: 3584,   
-            cullWithChildrenBounds: true, 
-            cullRequestsWhileMoving: false,
-            dynamicScreenSpaceError: false,
-            dynamicScreenSpaceErrorDensity: 0.00200,
-            dynamicScreenSpaceErrorFactor: 1.0,
-            dynamicScreenSpaceErrorHeightFalloff: 0.3,
-            preferLeaves: true,                 // 【关键】直接优先请求最高精度的“叶子”节点
-            preloadWhenHidden: true,            // 允许在后台提前静默加载，防止视角转过去时是空白
-            skipLevelOfDetail: false,
-            baseScreenSpaceError: 1024,
-            skipScreenSpaceErrorFactor: 16,
-            skipLevels: 1,
-            preloadAncestors: true,
-          })
-        } catch (error) {
-          throw new Error(`模型加载失败: ${url}，${error.message}`)
-        }
-      })
-
-      const tilesets = await Promise.all(loadPromises)
-      if (!this.viewer) return tilesets
-
-      tilesets.forEach(tileset => this.viewer.scene.primitives.add(tileset))
-
-      const mainTileset = tilesets[0]
-      if (!mainTileset) {
-        this.tilesets = tilesets
-        return tilesets
-      }
-
-      await mainTileset.readyPromise
-      if (!mainTileset.boundingSphere) {
-        this.tilesets = tilesets
-        return tilesets
-      }
-
-      // 整体底图的高度下沉（适应真实海拔）
-      const heightOffset = -40.2
-      const boundingSphere = mainTileset.boundingSphere
-      const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center)
-      const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0)
-      const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset)
-      const translation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3())
-      const modelMatrix = Cesium.Matrix4.fromTranslation(translation)
-
-      tilesets.forEach(tileset => {
-        tileset.modelMatrix = modelMatrix
-      })
-
-      // ---------------- 解决杆子闪烁的核心代码 ----------------
       try {
-        // 根据 tileset.json，"杆"模型是第二个子节点 (children[1])
-        if (mainTileset.root && mainTileset.root.children && mainTileset.root.children.length > 1) {
-          const poleNode = mainTileset.root.children[1]; 
-          
-          // 给“杆”单独加一个向上的微小偏移量（0.2米）
-          // 这样它就会刚好浮在倾斜模型自带的杆子表面之上，打破深度冲突
-          const poleOffset = Cesium.Cartesian3.fromElements(0, 0, 0.2); 
-          const poleTranslation = Cesium.Matrix4.fromTranslation(poleOffset);
-          
-          // 应用变换矩阵
-          poleNode.transform = Cesium.Matrix4.multiply(
-            poleNode.transform, 
-            poleTranslation, 
-            new Cesium.Matrix4()
-          );
-        }
-      } catch (e) {
-        console.warn('处理杆模型高度偏移时出错:', e);
-      }
-      // --------------------------------------------------------
+        // ======================================================
+        // 🥇 亲儿子待遇：倾斜摄影底图
+        // ======================================================
+        const terrainTileset = await Cesium.Cesium3DTileset.fromUrl(
+          this.resolveAssetPath('models/site_model/newmodel/倾斜模型/tileset.json'), {
+          maximumScreenSpaceError: 8, // 黄金清晰度
+          maximumMemoryUsage: 3072,    // 霸占 3GB 显存池
+          preferLeaves: true,
+          skipLevelOfDetail: true,
+          cullWithChildrenBounds: true
+        });
 
-      this.tilesets = tilesets
-      this.viewer.scene.requestRender()
-      await this.waitForNextFrame()
-      return tilesets
+        // ======================================================
+        // 🥈 后娘养的：杆子（精模）
+        // ======================================================
+        const poleTileset = await Cesium.Cesium3DTileset.fromUrl(
+          this.resolveAssetPath('models/site_model/newmodel/杆/tileset.json'), {
+          maximumScreenSpaceError: 16, // 极其苛刻的视力表：稍微远一点就让它变糊
+          maximumMemoryUsage: 500,     // 显存限制死，最多只给 400MB，塞不下就扔掉看不见的杆子
+
+          // ⛔ 核心抗漏杀 1：绝对禁止跳级！老老实实给我把叶子节点抓出来！
+          skipLevelOfDetail: false,    
+          preferLeaves: true,          // 优先抓取最精细的杆子
+
+          // ⛔ 核心抗漏杀 2：拖拽视角时，死都不准掐断请求！(极其关键)
+          cullRequestsWhileMoving: false, 
+
+          // ⛔ 核心抗漏杀 3：关闭所有的视锥体和边缘剔除优化！
+          cullWithChildrenBounds: false, 
+          foveatedScreenSpaceError: false,
+          
+          // 连带加载兄弟节点，防止断裂
+          loadSiblings: true,
+          preloadAncestors: true
+        });
+
+        // ======================================================
+        // 🥉 顺带加载：线（精模）
+        // ======================================================
+        const lineTileset = await Cesium.Cesium3DTileset.fromUrl(
+          this.resolveAssetPath('models/site_model/newmodel/线/tileset.json'), {
+          maximumScreenSpaceError: 8,
+          maximumMemoryUsage: 400,     // 只给 400MB
+          cullWithChildrenBounds: true,
+          // ⛔ 核心抗漏杀 1：绝对禁止跳级！老老实实给我把叶子节点抓出来！
+          skipLevelOfDetail: false,    
+          preferLeaves: true,          // 优先抓取最精细的杆子
+
+          // ⛔ 核心抗漏杀 2：拖拽视角时，死都不准掐断请求！(极其关键)
+          cullRequestsWhileMoving: false, 
+
+          // ⛔ 核心抗漏杀 3：关闭所有的视锥体和边缘剔除优化！
+
+          foveatedScreenSpaceError: false,
+          
+          // 连带加载兄弟节点，防止断裂
+          loadSiblings: true,
+          preloadAncestors: true
+        });
+
+        // 1. 统一处理地表下沉高度 (保持你原本的逻辑)
+        const heightOffset = -40.2;
+        await terrainTileset.readyPromise;
+        const boundingSphere = terrainTileset.boundingSphere;
+        const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center);
+        const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0);
+        const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset);
+        const baseTranslation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3());
+        
+        // 倾斜底图直接应用下沉
+        terrainTileset.modelMatrix = Cesium.Matrix4.fromTranslation(baseTranslation);
+        
+        // 2. 杆和线不仅要跟着下沉，还要加上那 0.2 米的防闪烁抬升
+        const offsetWithPole = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset + 0.2);
+        const poleTranslation = Cesium.Cartesian3.subtract(offsetWithPole, surface, new Cesium.Cartesian3());
+        const poleMatrix = Cesium.Matrix4.fromTranslation(poleTranslation);
+        
+        poleTileset.modelMatrix = poleMatrix;
+        lineTileset.modelMatrix = poleMatrix;
+
+        // 添加到场景中
+        this.viewer.scene.primitives.add(terrainTileset);
+        this.viewer.scene.primitives.add(poleTileset);
+        this.viewer.scene.primitives.add(lineTileset);
+
+        // ======================================================
+        // 🔥 物理外挂：上帝视角直接把杆子和线“拔电源”！
+        // ======================================================
+        this.viewer.scene.preUpdate.addEventListener(() => {
+           // 获取当前相机距离地面的高度
+           const cameraHeight = this.viewer.camera.positionCartographic.height;
+           
+           // 阈值：当视角高于 150 米时（你可以自己调这个数值，50也行，200也行）
+           if (cameraHeight > 150) { 
+               // 彻底隐藏并停止渲染，显存和带宽瞬间释放 100% 给倾斜底图
+               poleTileset.show = false;
+               lineTileset.show = false;
+           } else {
+               // 飞近了再显示，满足巡检需求
+               poleTileset.show = true;
+               lineTileset.show = true;
+           }
+        });
+
+        this.tilesets = [terrainTileset, poleTileset, lineTileset];
+        this.viewer.scene.requestRender();
+        await this.waitForNextFrame();
+        
+        return this.tilesets;
+
+      } catch (error) {
+        throw new Error(`模型加载失败: ${error.message}`);
+      }
     },
     async initCesium() {
       if (this.viewer) return
@@ -1273,7 +1302,7 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
       }
 
       // 2. 初始化动态距离
-      if (this.currentChaseDistance === undefined) {
+      if (this.currentChaseDistance === undefined || this.currentChaseDistance > defaultDistance) {
         this.currentChaseDistance = defaultDistance;
       }
 
@@ -1283,7 +1312,9 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
         this.chaseWheelHandler.setInputAction((movement) => {
           if (this.cameraMode === 'third') {
             this.currentChaseDistance -= movement * 0.05; 
-            this.currentChaseDistance = Math.max(5, Math.min(this.currentChaseDistance, 300));
+            // 🔥 核心修改：把原本的 300 换成 defaultDistance，这样默认距离就是最远距离！
+            // 5 是最近的距离，可以根据你的模型大小调整（如果穿模了可以把 5 改成 10）
+            this.currentChaseDistance = Math.max(5, Math.min(this.currentChaseDistance, defaultDistance));
           }
         }, Cesium.ScreenSpaceEventType.WHEEL);
       }
@@ -1435,7 +1466,7 @@ enableChaseCamera(entity, defaultDistance = 80, defaultHeight = 30) {
 
       if (this.cameraMode === 'third') {
         if ((force || !this.chaseCameraListener) && this.droneEntity) {
-          this.enableChaseCamera(this.droneEntity, 80, 30);
+          this.enableChaseCamera(this.droneEntity, 20, 7.5);
         }
         return;
       }
@@ -2382,7 +2413,7 @@ updateDroneEntityFromPosition(position) {
       if (this.cameraMode === 'bird') {
         this.updateBirdCameraFromCoords(longitude, latitude, altitude)
       } else if (this.cameraMode === 'third' && !this.chaseCameraListener) {
-        this.enableChaseCamera(this.droneEntity, 80, 30)
+        this.enableChaseCamera(this.droneEntity, 20, 7.5)
       }
     },
     getFlightStatsKey(dock = this.selectedDock) {
