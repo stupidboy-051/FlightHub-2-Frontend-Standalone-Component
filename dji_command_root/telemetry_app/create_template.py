@@ -79,13 +79,16 @@ def create_template():
     hdr_cells[4].text = '位置(经纬度)'
     
     # Data row loop with docxtpl tags
+    # 使用标准的 Jinja2 循环标签，并将它们单独放在行内，避免 docxtpl 的 tr 标签兼容性问题
+    
     data_row = table.add_row()
-    # 修复 docxtpl 的循环标签语法
-    data_row.cells[0].text = '{% tr for item in anomalies %}\n{{ loop.index }}'
+    # {% tr %} 是老版本的 docxtpl 写法或者容易因为 word 内部 xml 结构被拆分而失效。
+    # 更安全的方法是使用标准的 Jinja 循环，docxtpl 会自动处理 table row 的循环。
+    data_row.cells[0].text = '{% for item in anomalies %}\n{{ loop.index }}'
     data_row.cells[1].text = '{{ item.time }}'
     data_row.cells[2].text = '{{ item.level }}'
     data_row.cells[3].text = '{{ item.description }}'
-    data_row.cells[4].text = '{{ item.longitude }}, {{ item.latitude }}\n{% tr endfor %}'
+    data_row.cells[4].text = '{{ item.longitude }}, {{ item.latitude }}\n{% endfor %}'
     
     doc.save(template_path)
     print(f"Template created at {template_path}")
