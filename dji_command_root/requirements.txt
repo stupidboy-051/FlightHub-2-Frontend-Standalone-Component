@@ -12,3 +12,4 @@ boto3>=1.42.9
 mysqlclient
 gunicorn==21.2.0  #
 redis>=5.0.0
+docxtpl==0.20.2
