@@ -2313,34 +2313,54 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def report_export(self, request, pk=None):
         """生成并下载子任务的 Word 报告"""
-        from docxtpl import DocxTemplate
-        from django.http import FileResponse
-        from io import BytesIO
-        import os
-        from django.conf import settings
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.info(f"========== 开始生成报告, 任务ID: {pk} ==========")
         
-        task = self.get_object()
-        context = self._get_report_context(task)
-        
-        template_path = os.path.join(settings.BASE_DIR, "templates", "report_template.docx")
-        if not os.path.exists(template_path):
-            return Response({"detail": "模版文件不存在"}, status=500)
+        try:
+            from docxtpl import DocxTemplate
+            from django.http import FileResponse
+            from io import BytesIO
+            import os
+            from django.conf import settings
             
-        doc = DocxTemplate(template_path)
-        doc.render(context)
-        
-        buffer = BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-        
-        filename = f"巡检报告_{context['task_name']}.docx"
-        # URL 编码文件名以支持中文
-        from urllib.parse import quote
-        encoded_filename = quote(filename)
-        
-        response = FileResponse(buffer, as_attachment=True, filename=filename)
-        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
-        return response
+            logger.info("依赖导入成功，开始获取任务和上下文")
+            task = self.get_object()
+            context = self._get_report_context(task)
+            logger.info(f"上下文获取成功，task_name: {context.get('task_name')}, 异常数量: {len(context.get('anomalies', []))}")
+            
+            template_path = os.path.join(settings.BASE_DIR, "templates", "report_template.docx")
+            logger.info(f"模板路径: {template_path}, 是否存在: {os.path.exists(template_path)}")
+            
+            if not os.path.exists(template_path):
+                logger.error(f"模板文件不存在: {template_path}")
+                return Response({"detail": "模版文件不存在"}, status=500)
+                
+            logger.info("开始渲染模板")
+            doc = DocxTemplate(template_path)
+            doc.render(context)
+            logger.info("模板渲染完成")
+            
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            logger.info("文档保存到内存完成")
+            
+            filename = f"巡检报告_{context['task_name']}.docx"
+            from urllib.parse import quote
+            encoded_filename = quote(filename)
+            logger.info(f"准备返回文件: {filename}")
+            
+            response = FileResponse(buffer, as_attachment=True, filename=filename)
+            response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+            return response
+            
+        except Exception as e:
+            error_msg = f"报告生成失败: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            print(error_msg) # 确保一定会打印到控制台
+            return Response({"detail": f"生成报告发生内部错误: {str(e)}", "traceback": traceback.format_exc()}, status=500)
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
