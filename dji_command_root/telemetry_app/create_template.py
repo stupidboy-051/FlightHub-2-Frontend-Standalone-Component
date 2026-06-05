@@ -79,14 +79,13 @@ def create_template():
     hdr_cells[4].text = '位置(经纬度)'
     
     # Data row loop with docxtpl tags
-    # 在 docxtpl 中，{% tr for item in anomalies %} 应该写在数据行的第一列，这样就不会产生额外的空行
     data_row = table.add_row()
-    # 结合 Jinja2 tr 标签
-    data_row.cells[0].text = '{% tr for item in anomalies %}{{ loop.index }}'
+    # 修复 docxtpl 的循环标签语法
+    data_row.cells[0].text = '{% tr for item in anomalies %}\n{{ loop.index }}'
     data_row.cells[1].text = '{{ item.time }}'
     data_row.cells[2].text = '{{ item.level }}'
     data_row.cells[3].text = '{{ item.description }}'
-    data_row.cells[4].text = '{{ item.longitude }}, {{ item.latitude }}{% tr endfor %}'
+    data_row.cells[4].text = '{{ item.longitude }}, {{ item.latitude }}\n{% tr endfor %}'
     
     doc.save(template_path)
     print(f"Template created at {template_path}")
