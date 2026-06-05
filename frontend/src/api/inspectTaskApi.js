@@ -47,6 +47,33 @@ export default {
     }
   },
 
+  // 获取子任务的报告预览数据
+  async getReportPreview(taskId) {
+    try {
+      const response = await api.get(`/inspect-tasks/${taskId}/report_preview/`)
+      return response
+    } catch (error) {
+      console.error('获取报告预览数据失败:', error)
+      throw error
+    }
+  },
+
+  // 导出子任务的 Word 报告
+  async exportReport(taskId) {
+    try {
+      const response = await api.get(`/inspect-tasks/${taskId}/report_export/`, {
+        responseType: 'blob'
+      })
+      // 注意：这里的拦截器可能会把 blob 数据拦截。
+      // 我们需要返回原始的 blob 数据，但目前拦截器默认 return response.data
+      // 所以对于 blob，axios 返回的就是 blob (放在 response.data 里)
+      return response
+    } catch (error) {
+      console.error('导出报告失败:', error)
+      throw error
+    }
+  },
+
   // 获取单个巡检任务详情
   async getInspectTaskDetail(taskId) {
     try {

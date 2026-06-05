@@ -129,6 +129,7 @@ export default {
   display: flex;
   flex-direction: column;
 }
+
 /* 仅覆盖本页面内告警列表字号，整体上调一档 */
 .alarm-content :deep(.alarm-table th),
 .alarm-content :deep(.alarm-table td) {

@@ -192,9 +192,9 @@ if REDIS_URL:
 # =========================================================
 # DJI 司空 API 配置 (硬编码版)
 # =========================================================
-DJI_API_BASE_URL = "http://192.168.10.20:30812"  # 你的司空平台内网地址
-DJI_X_USER_TOKEN = "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiYWRtaW4iLCJleHAiOjIwODkzNDYyNTcsIm5iZiI6MTc3MzcyNzA1Nywib3JnYW5pemF0aW9uX3V1aWQiOiJiNTlmMTc2Yi0wNjIyLTRkNWEtYWI2Yi04NmE4MTFmNGRiNTkiLCJwcm9qZWN0X3V1aWQiOiIiLCJzdWIiOiJmaDIiLCJ1c2VyX2lkIjoiMTc1ODUxMzQyNDYxOTI4MzY1OCJ9.wjqekGCLHXQGAyfTODH-VTH5nF3-qKHb6rwQN80xRK0mAt_qZ9_dThxgL9mhty9DJO2DHKF7f_h7xeuIRo1o5g" # 你的长Token
-DJI_X_PROJECT_UUID = "7b21e3a8-33c8-46cb-b80e-b3ddc53ce644"  # 你的项目ID
+DJI_API_BASE_URL = "http://192.168.10.2:30812"  # 你的司空平台内网地址
+DJI_X_USER_TOKEN = "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiIiwiZXhwIjoyMDkyNDYzNTE0LCJuYmYiOjE3NzY4NDQzMTQsIm9yZ2FuaXphdGlvbl91dWlkIjoiYzBkOTM3YWItZDNhOC00OTk2LWI0YzYtNDE5YzUxMmMwZWFkIiwicHJvamVjdF91dWlkIjoiIiwic3ViIjoiZmgyIiwidXNlcl9pZCI6IjE3NzY4NDAwNTMzODkyNzc4MTMifQ.ZBlMdvLI-yKySU3-5x0XGfy02VwmhT3g82AvPf4CMmV2wXJChRQwFi6U7eTDbi8Sh5nvFrVPN0C28G6EKUVHWg" # 你的长Token
+DJI_X_PROJECT_UUID = "de6eaa69-5054-439b-93cc-084238b8edc2"  # 你的项目ID
 DJI_X_Request_ID = "12345678"   # 任意唯一标识
 DJI_X_LANGUAGE = "zh"
 

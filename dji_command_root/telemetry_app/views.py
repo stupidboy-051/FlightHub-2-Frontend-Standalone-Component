@@ -2266,6 +2266,82 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
         serializer = InspectTaskSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    def _get_report_context(self, task):
+        """获取报告所需的数据上下文"""
+        from django.db.models import Count
+        
+        # 基础信息
+        task_name = task.dji_task_name or task.external_task_id or f"任务_{task.id}"
+        execute_time = task.started_at.strftime('%Y-%m-%d %H:%M:%S') if task.started_at else (task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else "未知")
+        task_type = task.detect_category.name if task.detect_category else "未知"
+        
+        # 异常数据
+        # 该子任务下的所有异常 (通过关联的图片查找)
+        alarms = Alarm.objects.filter(source_image__inspect_task=task).order_by("-created_at")
+        total_anomalies = alarms.count()
+        
+        anomalies_list = []
+        for alarm in alarms[:10]:
+            # 尝试获取级别，没有的话显示未知
+            level = "未知"
+            if alarm.findings_data and isinstance(alarm.findings_data, list) and len(alarm.findings_data) > 0:
+                level = str(alarm.findings_data[0].get("level", "未知"))
+                
+            anomalies_list.append({
+                "time": alarm.created_at.strftime('%Y-%m-%d %H:%M:%S') if alarm.created_at else "",
+                "level": level,
+                "description": alarm.content or "",
+                "longitude": str(alarm.longitude) if alarm.longitude else "-",
+                "latitude": str(alarm.latitude) if alarm.latitude else "-"
+            })
+            
+        return {
+            "task_name": task_name,
+            "execute_time": execute_time,
+            "task_type": task_type,
+            "total_anomalies": total_anomalies,
+            "anomalies": anomalies_list
+        }
+
+    @action(detail=True, methods=["get"])
+    def report_preview(self, request, pk=None):
+        """获取子任务的报告预览数据"""
+        task = self.get_object()
+        context = self._get_report_context(task)
+        return Response(context)
+
+    @action(detail=True, methods=["get"])
+    def report_export(self, request, pk=None):
+        """生成并下载子任务的 Word 报告"""
+        from docxtpl import DocxTemplate
+        from django.http import FileResponse
+        from io import BytesIO
+        import os
+        from django.conf import settings
+        
+        task = self.get_object()
+        context = self._get_report_context(task)
+        
+        template_path = os.path.join(settings.BASE_DIR, "templates", "report_template.docx")
+        if not os.path.exists(template_path):
+            return Response({"detail": "模版文件不存在"}, status=500)
+            
+        doc = DocxTemplate(template_path)
+        doc.render(context)
+        
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        
+        filename = f"巡检报告_{context['task_name']}.docx"
+        # URL 编码文件名以支持中文
+        from urllib.parse import quote
+        encoded_filename = quote(filename)
+        
+        response = FileResponse(buffer, as_attachment=True, filename=filename)
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+        return response
+
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
         """启动巡检任务:将状态从pending改为scanning"""

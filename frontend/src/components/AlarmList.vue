@@ -133,7 +133,7 @@
                 <button @click="updateAlarmStatus(alarm)" class="action-btn update-btn">
                   更新
                 </button>
-                <button @click="deleteAlarm(alarm.id)" class="action-btn delete-btn">
+                <button @click="deleteAlarm(alarm)" class="action-btn delete-btn">
                   删除
                 </button>
               </div>
@@ -169,9 +169,8 @@
     </div>
     
     <!-- 状态更新对话框 -->
-    <Teleport to="body">
-      <div v-if="showStatusDialog" class="modal-overlay" @click.self="showStatusDialog = false">
-        <div class="modal-premium">
+    <div v-if="showStatusDialog" class="modal-overlay detail-overlay" @click.self="showStatusDialog = false">
+      <div class="modal-premium detail-modal" :style="detailModalStyle">
           <div class="modal-header">
             <h3 class="modal-title">更新告警状态</h3>
             <button @click="showStatusDialog = false" class="modal-close">×</button>
@@ -242,12 +241,10 @@
           </div>
         </div>
       </div>
-    </Teleport>
     
     <!-- 详情对话框 -->
-    <Teleport to="body">
-      <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
-        <div class="modal-premium detail-modal">
+    <div v-if="showDetailDialog" class="modal-overlay detail-overlay" @click.self="showDetailDialog = false">
+      <div class="modal-premium detail-modal" :style="detailModalStyle">
           <div class="modal-header">
             <h3 class="modal-title">告警详情</h3>
             <button @click="showDetailDialog = false" class="modal-close">×</button>
@@ -306,7 +303,31 @@
           </div>
         </div>
       </div>
-    </Teleport>
+
+    <!-- 删除确认对话框 -->
+    <div v-if="showDeleteDialog" class="modal-overlay detail-overlay" @click.self="showDeleteDialog = false">
+      <div class="modal-premium detail-modal" :style="detailModalStyle">
+        <div class="modal-header">
+          <h3 class="modal-title">确认删除</h3>
+          <button @click="showDeleteDialog = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="info-row">
+            <span class="info-label">告警ID:</span>
+            <span class="info-value">{{ alarmToDelete?.id }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label" style="width: 100%; color: #ef4444; font-weight: bold;">
+              确定要删除这条告警吗？此操作不可恢复。
+            </span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="showDeleteDialog = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="confirmDelete" class="modal-btn primary-btn" style="background: #ef4444;">确认删除</button>
+        </div>
+      </div>
+    </div>
 
     <Teleport to="body">
       <div v-if="showImagePreview" class="modal-overlay" @click.self="closeImagePreview">
@@ -330,7 +351,7 @@
 <script>
 import alarmApi from '../api/alarmApi.js'
 import waylineApi from '../api/waylineApi.js'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 
 export default {
   name: 'AlarmList',
@@ -354,7 +375,10 @@ export default {
       currentAlarm: null,
       previewImageUrl: '',
       newAlarmStatus: '',
-      activeDropdown: '' // 当前打开的下拉框：'status' | 'type' | 'wayline' | ''
+      activeDropdown: '', // 当前打开的下拉框：'status' | 'type' | 'wayline' | ''
+      detailModalMaxWidth: 0,
+      showDeleteDialog: false,
+      alarmToDelete: null
     }
   },
   directives: {
@@ -375,6 +399,22 @@ export default {
   mounted() {
     this.loadAlarms()
     this.loadWaylines()
+    this.updateDetailModalLayout()
+    this._onWindowResize = () => this.updateDetailModalLayout()
+    window.addEventListener('resize', this._onWindowResize, { passive: true })
+    const container = this.$el?.closest?.('.alarm-content')
+    if (container && typeof ResizeObserver !== 'undefined') {
+      this._detailContainerObserver = new ResizeObserver(() => this.updateDetailModalLayout())
+      this._detailContainerObserver.observe(container)
+    }
+  },
+  beforeUnmount() {
+    if (this._onWindowResize) {
+      window.removeEventListener('resize', this._onWindowResize)
+    }
+    if (this._detailContainerObserver) {
+      this._detailContainerObserver.disconnect()
+    }
   },
   computed: {
     filteredWaylines() {
@@ -411,9 +451,23 @@ export default {
       console.log('--- Filtering Debug End ---')
       
       return result
+    },
+    detailModalStyle() {
+      if (!this.detailModalMaxWidth) return {}
+      return { maxWidth: `${this.detailModalMaxWidth}px` }
     }
   },
   methods: {
+    updateDetailModalLayout() {
+      const container = this.$el?.closest?.('.alarm-content') || this.$el
+      const rect = container?.getBoundingClientRect?.()
+      const width = rect?.width || 0
+      if (!width) return
+      const targetWidth = Math.floor(width * 0.5)
+      const viewportMax = Math.max(320, window.innerWidth - 40)
+      const finalWidth = Math.max(320, Math.min(targetWidth, viewportMax))
+      this.detailModalMaxWidth = finalWidth
+    },
     handleDetectTypeChange() {
       this.waylineIdFilter = ''
       this.currentPage = 1
@@ -593,6 +647,7 @@ export default {
     },
     viewAlarmDetail(alarm) {
       this.currentAlarm = alarm
+      this.updateDetailModalLayout()
       this.showDetailDialog = true
     },
     updateAlarmStatus(alarm) {
@@ -609,23 +664,23 @@ export default {
         console.error('更新状态失败:', error)
       }
     },
-    async deleteAlarm(id) {
+    async deleteAlarm(alarm) {
+      this.alarmToDelete = alarm
+      this.showDeleteDialog = true
+    },
+    async confirmDelete() {
+      if (!this.alarmToDelete) return
       try {
-        await ElMessageBox.confirm('确定要删除这条告警吗？', '提示', {
-          confirmButtonText: '删除',
-          cancelButtonText: '取消',
-          type: 'warning'
-        })
-        await alarmApi.deleteAlarm(id)
+        await alarmApi.deleteAlarm(this.alarmToDelete.id)
         ElMessage.success('删除成功')
+        this.showDeleteDialog = false
+        this.alarmToDelete = null
         this.loadAlarms()
       } catch (error) {
-        if (error === 'cancel' || error === 'close') return
         console.error('删除告警失败:', error)
         ElMessage.error('删除告警失败')
       }
-    }
-    ,
+    },
     openImagePreview(url) {
       this.previewImageUrl = url
       this.showImagePreview = true
@@ -641,6 +696,7 @@ export default {
 <style scoped>
 /* 主容器 */
 .alarm-list-premium {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1212,6 +1268,14 @@ export default {
   padding: 20px;
 }
 
+.detail-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
 .modal-premium {
   background: rgba(26, 31, 58, 0.95);
   backdrop-filter: blur(20px);
@@ -1227,7 +1291,7 @@ export default {
 }
 
 .detail-modal {
-  max-width: 700px;
+  max-width: none;
 }
 
 @keyframes modalSlideIn {
@@ -1251,7 +1315,7 @@ export default {
 }
 
 .modal-title {
-  font-size: 18px;
+  font-size: clamp(16px, 1.2vw, 18px);
   font-weight: 700;
   color: #ef4444;
   margin: 0;
@@ -1279,7 +1343,7 @@ export default {
 }
 
 .modal-body {
-  padding: 24px;
+  padding: clamp(16px, 2vw, 24px);
   overflow: auto;
   min-height: 0;
 }
@@ -1391,7 +1455,7 @@ export default {
 
 .detail-label {
   color: #94a3b8;
-  font-size: 14px;
+  font-size: clamp(12px, 1vw, 14px);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -1399,9 +1463,19 @@ export default {
 
 .detail-value {
   color: #e2e8f0;
-  font-size: 16px;
+  font-size: clamp(14px, 1.1vw, 16px);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.detail-modal .detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .alarm-image {
@@ -1411,6 +1485,8 @@ export default {
   border: 1px solid rgba(239, 68, 68, 0.2);
   cursor: zoom-in;
   transition: all 0.2s ease;
+  max-height: min(40vh, 360px);
+  background: rgba(10, 14, 39, 0.6);
 }
 
 .alarm-image:focus-visible {
@@ -1437,7 +1513,8 @@ export default {
 
 .alarm-image img {
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
   display: block;
 }
 

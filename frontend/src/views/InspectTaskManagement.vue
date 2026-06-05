@@ -126,6 +126,7 @@ export default {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
 }
 
 /* 与告警管理页保持一致：表格正文 17px，次级信息与操作 14px */

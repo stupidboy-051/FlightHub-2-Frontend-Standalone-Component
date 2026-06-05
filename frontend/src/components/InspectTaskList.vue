@@ -91,18 +91,24 @@
             <td :colspan="isSubTaskMode ? 8 : 6" class="empty-row">暂无任务数据</td>
           </tr>
           <tr v-for="task in filteredTasks" :key="task.id" class="task-row">
-            <td>
+            <td class="ellipsis-cell">
               <!-- 🔥 修复：父任务显示external_task_id，子任务显示dji_task_name -->
-              <span class="task-name" :title="isSubTaskMode ? (task.dji_task_name || task.external_task_id) : task.external_task_id">
-                {{ isSubTaskMode ? (task.dji_task_name || task.external_task_id || '--') : (task.external_task_id || '--') }}
-              </span>
+              <el-tooltip :content="isSubTaskMode ? (task.dji_task_name || task.external_task_id || '--') : (task.external_task_id || '--')" placement="top" effect="dark" :show-after="300">
+                <span class="text-ellipsis">
+                  {{ isSubTaskMode ? (task.dji_task_name || task.external_task_id || '--') : (task.external_task_id || '--') }}
+                </span>
+              </el-tooltip>
             </td>
-            <td v-if="isSubTaskMode">
+            <td v-if="isSubTaskMode" class="ellipsis-cell">
               <span class="device-badge" :class="{'has-sn': task.device_sn}">
                 {{ task.device_sn || '--' }}
               </span>
             </td>
-            <td v-if="isSubTaskMode">{{ task.wayline_details?.name || '--' }}</td>
+            <td v-if="isSubTaskMode" class="ellipsis-cell">
+              <el-tooltip :content="task.wayline_details?.name || '--'" placement="top" effect="dark" :show-after="300">
+                <span class="text-ellipsis">{{ task.wayline_details?.name || '--' }}</span>
+              </el-tooltip>
+            </td>
             <td v-if="isSubTaskMode">
               <span class="category-badge">
                 {{ task.detect_category_name || getCategoryName(task.detect_category) || '未设置' }}
@@ -131,6 +137,14 @@
                 >
                   回放
                 </button>
+                <button
+                  v-if="isSubTaskMode && task.detect_status === 'done'"
+                  @click="openReportPreview(task)"
+                  class="action-btn report-btn"
+                  :disabled="task.is_cleaned"
+                >
+                  生成报告
+                </button>
                 <button @click="viewTaskDetail(task)" class="action-btn view-btn" :disabled="task.is_cleaned">
                   {{ isSubTaskMode ? '查看' : '统计' }}
                 </button>
@@ -146,7 +160,7 @@
                 >
                   强制删除
                 </button>
-                <button v-if="isSubTaskMode" @click="deleteTask(task.id)" class="action-btn delete-btn" :disabled="task.is_cleaned">
+                <button v-if="isSubTaskMode" @click="openDeleteTask(task)" class="action-btn delete-btn" :disabled="task.is_cleaned">
                   删除
                 </button>
                 <button
@@ -190,9 +204,8 @@
     </div>
     
     <!-- 父任务详情对话框 -->
-    <Teleport to="#app">
-      <div v-if="showDetailDialog" class="modal-overlay" @click.self="showDetailDialog = false">
-        <div class="modal-premium detail-modal" :class="isCurrentParentTask ? 'detail-modal--parent' : 'detail-modal--child'">
+    <div v-if="showDetailDialog" class="modal-overlay detail-overlay" @click.self="showDetailDialog = false">
+      <div class="modal-premium detail-modal" :class="isCurrentParentTask ? 'detail-modal--parent' : 'detail-modal--child'" :style="detailModalStyle">
           <div class="modal-header">
             <h3 class="modal-title">{{ isCurrentParentTask ? '统计详情' : '子任务详情' }}</h3>
             <button @click="showDetailDialog = false" class="modal-close">×</button>
@@ -282,12 +295,10 @@
           </div>
         </div>
       </div>
-    </Teleport>
 
     <!-- 子任务对话框 -->
-    <Teleport to="body">
-      <div v-if="showSubTaskDialog" class="modal-overlay" @click.self="showSubTaskDialog = false">
-        <div class="modal-premium wide-modal">
+    <div v-if="showSubTaskDialog" class="modal-overlay detail-overlay" @click.self="showSubTaskDialog = false">
+      <div class="modal-premium wide-modal" :style="wideModalStyle">
           <div class="modal-header">
             <h3 class="modal-title">任务列表 - {{ currentTask?.external_task_id || currentTask?.id }}巡检任务</h3>
             <button @click="showSubTaskDialog = false" class="modal-close">×</button>
@@ -314,9 +325,19 @@
               <tbody>
                 <tr v-for="item in subTasks" :key="item.id" class="task-row">
                   <td><span class="id-badge">{{ item.id }}</span></td>
-                  <td>{{ item.external_task_id || '--' }}</td>
-                  <td><span class="device-badge">{{ item.device_sn || '--' }}</span></td> <!-- 🔥 新增 -->
-                  <td>{{ item.wayline_details?.name || getWaylineLabel(item.wayline) || '--' }}</td>
+                  <td class="ellipsis-cell">
+                    <el-tooltip :content="item.external_task_id || '--'" placement="top" effect="dark" :show-after="300">
+                      <span class="text-ellipsis">{{ item.external_task_id || '--' }}</span>
+                    </el-tooltip>
+                  </td>
+                  <td class="ellipsis-cell">
+                    <span class="device-badge">{{ item.device_sn || '--' }}</span>
+                  </td> <!-- 🔥 新增 -->
+                  <td class="ellipsis-cell">
+                    <el-tooltip :content="item.wayline_details?.name || getWaylineLabel(item.wayline) || '--'" placement="top" effect="dark" :show-after="300">
+                      <span class="text-ellipsis">{{ item.wayline_details?.name || getWaylineLabel(item.wayline) || '--' }}</span>
+                    </el-tooltip>
+                  </td>
                   <td>
                     <span class="category-badge">
                       {{ item.detect_category_name || getCategoryName(item.detect_category) || '未设置' }}
@@ -337,14 +358,23 @@
                     </span>
                   </td>
                   <td>
-                    <button 
-                      v-if="item.detect_status === 'done'"
-                      @click="playbackSubTask(item)" 
-                      class="action-btn playback-btn"
-                    >
-                      回放
-                    </button>
-                    <span v-else class="text-muted">未完成</span>
+                    <div class="action-buttons" style="justify-content: center;">
+                      <button 
+                        v-if="item.detect_status === 'done'"
+                        @click="playbackSubTask(item)" 
+                        class="action-btn playback-btn"
+                      >
+                        回放
+                      </button>
+                      <button 
+                        v-if="item.detect_status === 'done'"
+                        @click="openReportPreview(item)" 
+                        class="action-btn report-btn"
+                      >
+                        生成报告
+                      </button>
+                      <span v-if="item.detect_status !== 'done'" class="text-muted">未完成</span>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -355,11 +385,83 @@
           </div>
         </div>
       </div>
-    </Teleport>
 
-    <Teleport to="body">
-      <div v-if="showCleanupDialog" class="modal-overlay" @click.self="closeCleanupDialog">
-        <div class="modal-premium cleanup-modal">
+    <!-- 报告预览对话框 -->
+    <div v-if="showReportPreviewDialog" class="modal-overlay detail-overlay" @click.self="showReportPreviewDialog = false">
+      <div class="modal-premium wide-modal" :style="wideModalStyle">
+        <div class="modal-header">
+          <h3 class="modal-title">报告预览</h3>
+          <button @click="showReportPreviewDialog = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="reportPreviewLoading" class="loading-state">
+            <div class="loading-spinner"></div>
+            <p>正在生成报告数据...</p>
+          </div>
+          <div v-else-if="reportPreviewData">
+            <!-- 基础信息 -->
+            <div class="report-section">
+              <h4 class="section-title">任务基础信息</h4>
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">任务名称</span>
+                  <span class="detail-value">{{ reportPreviewData.task_name }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">执行时间</span>
+                  <span class="detail-value">{{ reportPreviewData.execute_time }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">任务类型</span>
+                  <span class="detail-value">{{ reportPreviewData.task_type }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">总异常数</span>
+                  <span class="detail-value has-alarm" style="font-weight:bold;color:#f56c6c;">{{ reportPreviewData.total_anomalies }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 异常列表 -->
+            <div class="report-section" style="margin-top: 20px;">
+              <h4 class="section-title">异常详情（前10条）</h4>
+              <table class="premium-table sub-task-table">
+                <thead>
+                  <tr>
+                    <th>序号</th>
+                    <th>发现时间</th>
+                    <th>类型/级别</th>
+                    <th>异常描述</th>
+                    <th>位置(经纬度)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="reportPreviewData.anomalies.length === 0">
+                    <td colspan="5" style="text-align: center; color: #909399;">暂无异常数据</td>
+                  </tr>
+                  <tr v-for="(anomaly, index) in reportPreviewData.anomalies" :key="index">
+                    <td>{{ index + 1 }}</td>
+                    <td>{{ anomaly.time }}</td>
+                    <td><span class="status-badge status-warning">{{ anomaly.level }}</span></td>
+                    <td>{{ anomaly.description || '--' }}</td>
+                    <td style="font-family: monospace;">{{ anomaly.longitude }}, {{ anomaly.latitude }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+          <button @click="showReportPreviewDialog = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="downloadReport" class="modal-btn primary-btn" :disabled="reportDownloading || reportPreviewLoading">
+            {{ reportDownloading ? '生成中...' : '下载 Word 报告' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showCleanupDialog" class="modal-overlay detail-overlay" @click.self="closeCleanupDialog">
+      <div class="modal-premium cleanup-modal" :style="detailModalStyle">
           <div class="modal-header">
             <h3 class="modal-title">清理确认 - {{ cleanupPreview?.parent?.display_name || cleanupPreview?.parent?.external_task_id || cleanupParentTask?.external_task_id || cleanupParentTask?.id }}</h3>
             <button @click="closeCleanupDialog" class="modal-close">×</button>
@@ -404,14 +506,66 @@
           </div>
         </div>
       </div>
-    </Teleport>
+    <div v-if="showDeleteDialog" class="modal-overlay detail-overlay" @click.self="showDeleteDialog = false">
+      <div class="modal-premium detail-modal" :style="detailModalStyle">
+        <div class="modal-header">
+          <h3 class="modal-title">确认删除</h3>
+          <button @click="showDeleteDialog = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="info-row">
+            <span class="info-label">任务ID:</span>
+            <span class="info-value">{{ taskToDelete?.id }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label" style="width: 100%; color: #ef4444; font-weight: bold;">
+              确定要删除这个巡检任务吗？此操作不可恢复。
+            </span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="showDeleteDialog = false" class="modal-btn secondary-btn">取消</button>
+          <button @click="confirmDeleteTask" class="modal-btn primary-btn" style="background: #ef4444;">确认删除</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showForceDeleteDialog" class="modal-overlay detail-overlay" @click.self="showForceDeleteDialog = false">
+      <div class="modal-premium detail-modal" :style="detailModalStyle">
+        <div class="modal-header">
+          <h3 class="modal-title">强制删除确认</h3>
+          <button @click="showForceDeleteDialog = false" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="info-row">
+            <span class="info-label">任务:</span>
+            <span class="info-value">{{ taskToForceDelete?.external_task_id || taskToForceDelete?.id }}</span>
+          </div>
+          <div class="info-row" v-if="forceDeleteStep === 1">
+            <span class="info-label" style="width: 100%; color: #ef4444; font-weight: bold;">
+              强制删除将彻底删除任务及其所有相关数据，不可恢复。<br>确定要继续吗？
+            </span>
+          </div>
+          <div class="info-row" v-if="forceDeleteStep === 2">
+            <span class="info-label" style="width: 100%; color: #dc2626; font-weight: bold; font-size: 16px;">
+              最后确认：真的要强制删除这个任务吗？所有相关数据将被永久删除！
+            </span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="showForceDeleteDialog = false" class="modal-btn secondary-btn">取消</button>
+          <button v-if="forceDeleteStep === 1" @click="proceedForceDelete" class="modal-btn primary-btn" style="background: #ef4444;">继续</button>
+          <button v-if="forceDeleteStep === 2" @click="confirmForceDelete" class="modal-btn primary-btn" style="background: #dc2626; box-shadow: 0 4px 16px rgba(220, 38, 38, 0.4);">强制删除</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import inspectTaskApi from '../api/inspectTaskApi'
 import waylineApi from '../api/waylineApi'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import DonutRing from './dashboard/DonutRing.vue'
 
 export default {
@@ -446,7 +600,19 @@ export default {
       activeDropdown: '',
       parentDonutSeries: [],
       parentDonutTotalImages: 0,
-      selectedParentSlice: null
+      selectedParentSlice: null,
+      detailModalMaxWidth: 0,
+      showForceDeleteDialog: false,
+      taskToForceDelete: null,
+      showDeleteDialog: false,
+      taskToDelete: null,
+      forceDeleteStep: 1, // 1: 第一次确认, 2: 第二次确认
+      wideModalMaxWidth: 0,
+      showReportPreviewDialog: false,
+      reportPreviewData: null,
+      reportPreviewLoading: false,
+      reportDownloading: false,
+      currentReportTaskId: null
     }
   },
   directives: {
@@ -467,6 +633,22 @@ export default {
   async mounted() {
     await this.loadWaylines()
     await this.loadTasks()
+    this.updateDetailModalLayout()
+    this._onWindowResize = () => this.updateDetailModalLayout()
+    window.addEventListener('resize', this._onWindowResize, { passive: true })
+    const container = this.$el?.closest?.('.task-content')
+    if (container && typeof ResizeObserver !== 'undefined') {
+      this._detailContainerObserver = new ResizeObserver(() => this.updateDetailModalLayout())
+      this._detailContainerObserver.observe(container)
+    }
+  },
+  beforeUnmount() {
+    if (this._onWindowResize) {
+      window.removeEventListener('resize', this._onWindowResize)
+    }
+    if (this._detailContainerObserver) {
+      this._detailContainerObserver.disconnect()
+    }
   },
   computed: {
     isSubTaskMode() {
@@ -511,9 +693,37 @@ export default {
         const type = (wayline.detect_type || '').toLowerCase()
         return targetVariants.some(v => type.includes(v))
       })
+    },
+    detailModalStyle() {
+      if (this.detailModalMaxWidth > 0) {
+        return {
+          maxWidth: `${this.detailModalMaxWidth}px`,
+          width: '50%',
+          minWidth: '500px'
+        }
+      }
+      return {}
+    },
+    wideModalStyle() {
+      if (this.wideModalMaxWidth > 0) {
+        return {
+          maxWidth: `${this.wideModalMaxWidth}px`,
+          width: '90%',
+          minWidth: '800px'
+        }
+      }
+      return {}
     }
   },
   methods: {
+    updateDetailModalLayout() {
+      const container = this.$el?.closest?.('.task-content')
+      if (container) {
+        const width = container.clientWidth
+        this.detailModalMaxWidth = Math.max(500, Math.floor(width * 0.95))
+        this.wideModalMaxWidth = Math.max(800, Math.floor(width * 0.95))
+      }
+    },
     resetFilters() {
       this.searchQuery = ''
       this.statusFilter = ''
@@ -639,8 +849,50 @@ export default {
         const subTasks = Array.isArray(res) ? res : (res?.results || [])
         this.buildParentDonutSeries(subTasks)
       } catch (e) {
-        this.parentDonutSeries = []
-        this.parentDonutTotalImages = 0
+        console.error('ensureParentDonut error:', e)
+      }
+    },
+    
+    async openReportPreview(task) {
+      this.currentReportTaskId = task.id
+      this.showReportPreviewDialog = true
+      this.reportPreviewLoading = true
+      this.reportPreviewData = null
+      
+      try {
+        const res = await inspectTaskApi.getReportPreview(task.id)
+        this.reportPreviewData = res
+      } catch (error) {
+        ElMessage.error('获取报告预览数据失败')
+        this.showReportPreviewDialog = false
+      } finally {
+        this.reportPreviewLoading = false
+      }
+    },
+    
+    async downloadReport() {
+      if (!this.currentReportTaskId) return
+      
+      this.reportDownloading = true
+      try {
+        const res = await inspectTaskApi.exportReport(this.currentReportTaskId)
+        // res 是 blob
+        const blob = new Blob([res], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `巡检报告_${this.reportPreviewData?.task_name || '子任务'}.docx`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+        
+        ElMessage.success('报告导出成功')
+      } catch (error) {
+        ElMessage.error('导出报告失败')
+        console.error(error)
+      } finally {
+        this.reportDownloading = false
       }
     },
     handleParentSegmentClick(item) {
@@ -865,48 +1117,42 @@ export default {
       }
     },
     
-    async deleteTask(taskId) {
+    openDeleteTask(task) {
+      this.taskToDelete = task
+      this.showDeleteDialog = true
+    },
+    async confirmDeleteTask() {
+      if (!this.taskToDelete) return
       try {
-        await ElMessageBox.confirm('确定要删除这个巡检任务吗？', '提示', {
-          confirmButtonText: '删除',
-          cancelButtonText: '取消',
-          type: 'warning'
-        })
-        await inspectTaskApi.deleteInspectTask(taskId)
+        await inspectTaskApi.deleteInspectTask(this.taskToDelete.id)
         ElMessage.success('删除成功')
+        this.showDeleteDialog = false
+        this.taskToDelete = null
         await this.loadTasks()
       } catch (error) {
-        if (error === 'cancel' || error === 'close') return
         console.error('删除任务失败:', error)
         ElMessage.error('删除任务失败')
       }
     },
 
-    async forceDeleteTask(task) {
-      const taskInfo = task.external_task_id || task.id
+    forceDeleteTask(task) {
+      this.taskToForceDelete = task
+      this.forceDeleteStep = 1
+      this.showForceDeleteDialog = true
+    },
+    proceedForceDelete() {
+      this.forceDeleteStep = 2
+    },
+    async confirmForceDelete() {
+      if (!this.taskToForceDelete) return
+      const task = this.taskToForceDelete
+
+      ElMessage.info({
+        message: '正在强制删除任务...',
+        duration: 2000
+      })
 
       try {
-        await ElMessageBox.confirm(
-          `强制删除将彻底删除任务及其所有相关数据，不可恢复。\n任务：${taskInfo}\n确定要继续吗？`,
-          '强制删除确认',
-          {
-            confirmButtonText: '继续',
-            cancelButtonText: '取消',
-            type: 'error'
-          }
-        )
-
-        await ElMessageBox.confirm('最后确认：真的要强制删除这个任务吗？所有相关数据将被永久删除！', '最后确认', {
-          confirmButtonText: '强制删除',
-          cancelButtonText: '取消',
-          type: 'error'
-        })
-
-        ElMessage.info({
-          message: '正在强制删除任务...',
-          duration: 2000
-        })
-
         const response = await inspectTaskApi.forceDeleteTask(task.id)
 
         ElMessage.success({
@@ -914,10 +1160,12 @@ export default {
           duration: 3000
         })
 
-        // 重新加载任务列表
+        this.showForceDeleteDialog = false
+        this.taskToForceDelete = null
+        this.forceDeleteStep = 1
+        
         await this.loadTasks()
       } catch (error) {
-        if (error === 'cancel' || error === 'close') return
         console.error('强制删除任务失败:', error)
         const errorMsg = error.response?.data?.detail || error.message || '强制删除任务失败'
         ElMessage.error({
@@ -1000,6 +1248,7 @@ export default {
 <style scoped>
 /* 主容器 */
 .inspect-task-list-premium {
+  position: relative;
   padding: 28px 36px;
   animation: cardSlideIn 0.5s ease-out;
   height: 100%;
@@ -1388,13 +1637,14 @@ export default {
 }
 
 .action-btn {
-  padding: 6px 12px;
+  padding: 4px 8px; /* 减小内边距，让按钮变小 */
   border: none;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px; /* 减小字体 */
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
+  white-space: nowrap; /* 防止文字换行 */
 }
 
 .action-btn:disabled {
@@ -1409,6 +1659,16 @@ export default {
 
 .view-btn:hover:not(:disabled) {
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  transform: translateY(-1px);
+}
+
+.report-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+}
+
+.report-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
   transform: translateY(-1px);
 }
 
@@ -1617,6 +1877,14 @@ export default {
   padding: 24px;
   z-index: 99999;
   animation: fadeIn 0.3s ease;
+}
+
+.detail-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 @media (max-width: 720px) {
@@ -2050,5 +2318,19 @@ export default {
 .modal-premium::-webkit-scrollbar-thumb:hover,
 .subtask-body::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.5);
+}
+/* 主表格和子表格的长文本省略 */
+.ellipsis-cell {
+  max-width: 0;
+  overflow: hidden;
+}
+
+.text-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  display: inline-block;
+  vertical-align: middle;
 }
 </style>
