@@ -74,21 +74,41 @@ def create_template():
     hdr_cells = table.rows[0].cells
     hdr_cells[0].text = '序号'
     hdr_cells[1].text = '发现时间'
-    hdr_cells[2].text = '异常类型/级别'
+    hdr_cells[2].text = '任务类型'
     hdr_cells[3].text = '异常描述'
     hdr_cells[4].text = '位置(经纬度)'
     
     # Data row loop with docxtpl tags
     # 使用标准的 Jinja2 循环标签，并将它们单独放在行内，避免 docxtpl 的 tr 标签兼容性问题
     
+    # 必须要用特殊的 {% tr %} 标签告诉 docxtpl 循环整行，否则会像普通文本一样循环把所有内容挤在一个格子里
+    # 为了避免之前的 TemplateSyntaxError，正确写法是把 {% tr %} 放在行级别的上下文，而不是单元格内。
+    # 这里我们创建一个专门用于占位的行，并在第一个单元格里写上循环控制标签
+    
     data_row = table.add_row()
-    # {% tr %} 是老版本的 docxtpl 写法或者容易因为 word 内部 xml 结构被拆分而失效。
-    # 更安全的方法是使用标准的 Jinja 循环，docxtpl 会自动处理 table row 的循环。
-    data_row.cells[0].text = '{% for item in anomalies %}\n{{ loop.index }}'
+    # 注意: docxtpl 要求 tr 循环必须写在一个单元格内，并且不能带换行符
+    # 把循环标签和内容合并，不要使用换行，避免产生 TemplateSyntaxError
+    data_row.cells[0].text = '{% tr for item in anomalies %}{{ loop.index }}'
     data_row.cells[1].text = '{{ item.time }}'
-    data_row.cells[2].text = '{{ item.level }}'
+    data_row.cells[2].text = '{{ task_type }}'
     data_row.cells[3].text = '{{ item.description }}'
-    data_row.cells[4].text = '{{ item.longitude }}, {{ item.latitude }}\n{% endfor %}'
+    data_row.cells[4].text = '{{ item.longitude }}, {{ item.latitude }}{% tr endfor %}'
+    
+    # 设置表格的列宽，防止文字被挤成竖排
+    from docx.shared import Cm
+    table.columns[0].width = Cm(1.5) # 序号
+    table.columns[1].width = Cm(4.0) # 发现时间
+    table.columns[2].width = Cm(3.0) # 异常类型/级别
+    table.columns[3].width = Cm(5.0) # 异常描述
+    table.columns[4].width = Cm(4.0) # 位置
+    
+    # 必须给每个 cell 单独设置宽度才生效
+    for row in table.rows:
+        row.cells[0].width = Cm(1.5)
+        row.cells[1].width = Cm(4.0)
+        row.cells[2].width = Cm(3.0)
+        row.cells[3].width = Cm(5.0)
+        row.cells[4].width = Cm(4.0)
     
     doc.save(template_path)
     print(f"Template created at {template_path}")
