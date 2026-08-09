@@ -31,7 +31,10 @@ def _claim_next_pending_image(task_id: Optional[int] = None) -> Optional[Inspect
 
         updated = (
             InspectImage.objects.filter(id=img.id, detect_status="pending")
-            .update(detect_status="processing")
+            .update(
+                detect_status="processing",
+                updated_at=django_timezone.now(),
+            )
         )
         if updated != 1:
             return None

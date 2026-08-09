@@ -253,34 +253,54 @@ def put_object_bytes(s3_client, bucket_name, object_name, data: bytes, content_t
 
 def safe_save(instance, retries=5, delay=0.5, **kwargs):
     """
-    Helper function to save model instances with retry logic for handling database locks.
+    保存模型实例，并处理 SQLite 锁及 MySQL 连接失效。
+
+    Django 的连接是线程本地的。常驻线程如果长时间空闲，可能继续持有已经被
+    MySQL wait_timeout 回收的连接；此时单纯重复 instance.save() 只会在同一条
+    坏连接上反复失败。遇到 2006/2013/2055 时必须先关闭当前线程的连接，让下次
+    save 自动建立新连接。
     """
+    import random
     import time
+    from django.db import DEFAULT_DB_ALIAS, close_old_connections, connections
     from django.db.utils import OperationalError
+
+    using = kwargs.get("using") or instance._state.db or DEFAULT_DB_ALIAS
+    connection_lost_codes = {2006, 2013, 2055}
     
     for attempt in range(retries):
         try:
             instance.save(**kwargs)
             return True
         except OperationalError as e:
-            # Check for database locked error (handling both string and object)
             error_str = str(e).lower()
-            if "locked" in error_str:
-                if attempt < retries - 1:
-                    # Exponential backoff with jitter
-                    import random
-                    sleep_time = delay * (2 ** attempt) + random.uniform(0, 0.1)
-                    time.sleep(sleep_time)
-                    continue
-            
+            error_code = e.args[0] if e.args and isinstance(e.args[0], int) else None
+            is_locked = "locked" in error_str
+            is_connection_lost = (
+                error_code in connection_lost_codes
+                or "server has gone away" in error_str
+                or "lost connection" in error_str
+            )
+
             print(f"❌ [DB] Save failed after {attempt+1} attempts: {e}")
-            if attempt == retries - 1:
-                 print(f"❌ [DB] Final save failure for {instance}: {e}")
-                 return False
+
+            if is_connection_lost:
+                # 丢弃当前线程持有的坏连接；下一次 save 会自动重新连接。
+                try:
+                    connections[using].close()
+                finally:
+                    close_old_connections()
+
+            retryable = is_locked or is_connection_lost
+            if not retryable or attempt == retries - 1:
+                print(f"❌ [DB] Final save failure for {instance}: {e}")
+                return False
+
+            sleep_time = delay * (2 ** attempt) + random.uniform(0, 0.1)
+            time.sleep(sleep_time)
         except Exception as e:
             print(f"❌ [DB] Unexpected error saving {instance}: {e}")
-            if attempt == retries - 1:
-                return False
+            return False
     return False
 
 
@@ -628,6 +648,19 @@ def auto_trigger_detect1(task):
     print(f"🏁 [Detect] 任务 {task.id} 结束.")
 
 def process_single_image(img, task, detect_url, algo_type, submit_time=None):
+    """在线程连接边界内处理单张图片。"""
+    from django.db import close_old_connections, connections
+
+    # ThreadPoolExecutor 的线程会长期复用，任务开始前清理超过 CONN_MAX_AGE
+    # 或已不可用的线程本地连接，任务结束后也不把连接留到下一批任务。
+    close_old_connections()
+    try:
+        return _process_single_image(img, task, detect_url, algo_type, submit_time)
+    finally:
+        connections.close_all()
+
+
+def _process_single_image(img, task, detect_url, algo_type, submit_time=None):
     """处理单张图片的逻辑（供并发调用）"""
     import time
     
@@ -643,9 +676,13 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
         if img.detect_status == 'done':
             print(f"⏩ [Skip] 图片 {img.id} 已标记为完成，跳过重复检测")
             return
-    except Exception:
-        # 如果查询数据库失败（例如被删了），暂不处理，继续后续逻辑尝试
-        pass
+    except InspectImage.DoesNotExist:
+        print(f"⏩ [Skip] 图片 {img.id} 已被删除，跳过检测")
+        return
+    except Exception as refresh_error:
+        # 数据库状态无法确认时不能继续调用算法，否则可能造成重复检测。
+        print(f"❌ [DB] 图片 {img.id} 状态刷新失败，停止本次检测: {refresh_error}")
+        return
     
     # 1. 构造极简请求 (符合之前确认的3字段协议)
     payload = {
@@ -702,7 +739,14 @@ def process_single_image(img, task, detect_url, algo_type, submit_time=None):
 
             img.result = data
             img.detect_status = "done"
-            safe_save(img, update_fields=['detect_status', 'result'])
+            img.updated_at = django_timezone.now()
+            saved = safe_save(
+                img,
+                update_fields=['detect_status', 'result', 'updated_at'],
+            )
+            if not saved:
+                print(f"❌ [Detect] 图片 {img.id} 算法结果未能落库，停止后续成功/告警流程")
+                return
 
             algo_status = data.get("detection_status", 0)
 
@@ -830,7 +874,10 @@ def auto_trigger_detect(task):
         updated_count = task.images.filter(
             id__in=eligible_ids,
             detect_status="pending",
-        ).update(detect_status="processing")
+        ).update(
+            detect_status="processing",
+            updated_at=django_timezone.now(),
+        )
         
         if updated_count > 0:
             print(f"🚀 [Async] 任务 {task.id} 将 {updated_count} 张图片提交至后台队列...")
@@ -2281,7 +2328,7 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
         total_anomalies = alarms.count()
         
         anomalies_list = []
-        for alarm in alarms[:10]:
+        for alarm in alarms:
             # 尝试获取级别，没有的话显示未知
             level = "未知"
             if alarm.findings_data and isinstance(alarm.findings_data, list) and len(alarm.findings_data) > 0:
@@ -2289,7 +2336,7 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
                 
             anomalies_list.append({
                 "time": alarm.created_at.strftime('%Y-%m-%d %H:%M:%S') if alarm.created_at else "",
-                "level": level,
+                "level": task_type,
                 "description": alarm.content or "",
                 "longitude": str(alarm.longitude) if alarm.longitude else "-",
                 "latitude": str(alarm.latitude) if alarm.latitude else "-"
@@ -2331,11 +2378,11 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
             logger.info(f"上下文获取成功，task_name: {context.get('task_name')}, 异常数量: {len(context.get('anomalies', []))}")
             
             template_path = os.path.join(settings.BASE_DIR, "templates", "report_template.docx")
-            logger.info(f"模板路径: {template_path}, 是否存在: {os.path.exists(template_path)}")
-            
-            if not os.path.exists(template_path):
-                logger.error(f"模板文件不存在: {template_path}")
-                return Response({"detail": "模版文件不存在"}, status=500)
+
+            # 每次导出都重新生成模板，确保模板与代码同步
+            from telemetry_app.create_template import create_template
+            create_template()
+            logger.info(f"模板已自动生成: {template_path}")
                 
             logger.info("开始渲染模板")
             doc = DocxTemplate(template_path)
@@ -2351,16 +2398,16 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
             from urllib.parse import quote
             encoded_filename = quote(filename)
             logger.info(f"准备返回文件: {filename}")
-            
-            response = FileResponse(buffer, as_attachment=True, filename=filename)
-            response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+
+            response = FileResponse(buffer, as_attachment=True, filename=f"report_{task.id}.docx")
+            response['Content-Disposition'] = f"attachment; filename=\"report_{task.id}.docx\"; filename*=UTF-8''{encoded_filename}"
             return response
             
         except Exception as e:
             error_msg = f"报告生成失败: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
             print(error_msg) # 确保一定会打印到控制台
-            return Response({"detail": f"生成报告发生内部错误: {str(e)}", "traceback": traceback.format_exc()}, status=500)
+            return Response({"detail": "生成报告发生内部错误，请查看服务器日志"}, status=500)
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
@@ -2648,6 +2695,26 @@ class WaylineViewSet(viewsets.ModelViewSet):
         'name': ['exact', 'icontains'],
         'status': ['exact'],
     }
+
+    def destroy(self, request, *args, **kwargs):
+        """安全删除航线：先解除关联，再删除"""
+        wayline = self.get_object()
+        from django.db import transaction
+
+        with transaction.atomic():
+            # 将关联的 Alarm 中的 wayline 设为 NULL
+            Alarm.objects.filter(wayline=wayline).update(wayline=None)
+
+            # 将关联的 InspectTask 中的 wayline 设为 NULL
+            InspectTask.objects.filter(wayline=wayline).update(wayline=None)
+
+            # WaylineImage 中的 alarm 外键设为 NULL（避免级联冲突）
+            WaylineImage.objects.filter(wayline=wayline).update(alarm=None)
+
+            # WaylineFingerprint 和 WaylineImage 会通过 CASCADE 自动级联删除
+            wayline.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -4350,19 +4417,19 @@ class WaylineFingerprintManager:
                 matched_category = None
 
                 if existing_wayline and existing_wayline.detect_type:
-                    # 尝试从数据库类型反查 category 对象
-                    # 注意：existing_wayline.detect_type 存储的是 normalized code (如 rail, bridge)
-                    # 我们需要找到对应的 AlarmCategory
                     db_type = existing_wayline.detect_type
-                    
-                    # 优先匹配 code 完全一致的
-                    matched_category = next((c for c in categories if normalize_detect_code(c.code) == db_type), None)
-                    
-                    if matched_category:
-                        print(f"   ✅ [Database] 航线 '{w_name_str}' 使用已有类型: {matched_category.name} ({db_type})")
+
+                    # 如果数据库中存的是 unknown 类型，不信任它，重新走关键词匹配
+                    if db_type == 'unknown':
+                        print(f"   🔄 [Fix] 航线 '{w_name_str}' 数据库类型为 unknown，尝试重新匹配...")
                     else:
-                        # 如果找不到对应的 category (比如类型被删了)，回退到关键词匹配
-                        print(f"   ⚠️ [Database] 航线 '{w_name_str}' 有类型 {db_type} 但未找到对应分类配置，尝试重新匹配...")
+                        # 优先匹配 code 完全一致的
+                        matched_category = next((c for c in categories if normalize_detect_code(c.code) == db_type), None)
+
+                        if matched_category:
+                            print(f"   ✅ [Database] 航线 '{w_name_str}' 使用已有类型: {matched_category.name} ({db_type})")
+                        else:
+                            print(f"   ⚠️ [Database] 航线 '{w_name_str}' 有类型 {db_type} 但未找到对应分类配置，尝试重新匹配...")
 
                 # 如果数据库没有匹配到，则尝试关键词匹配
                 if not matched_category:
@@ -4372,6 +4439,8 @@ class WaylineFingerprintManager:
                         "bridge": ["bridge", "桥梁"],
                         "protected_area": ["protected_area", "保护区"],
                     }
+                    # 收集所有匹配的 category，按优先级排序（非 unknown 优先）
+                    all_matches = []
                     for cat in categories:
                         norm_code = normalize_detect_code(cat.code)
                         tokens = []
@@ -4380,10 +4449,12 @@ class WaylineFingerprintManager:
                         tokens.extend(keyword_map.get(norm_code, []))
                         for token in tokens:
                             if token and token.lower() in w_name_lower:
-                                matched_category = cat
+                                all_matches.append(cat)
                                 break
-                        if matched_category:
-                            break
+
+                    # 优先选择非 unknown 类型的匹配结果
+                    non_unknown = [c for c in all_matches if normalize_detect_code(c.code) != 'unknown']
+                    matched_category = non_unknown[0] if non_unknown else (all_matches[0] if all_matches else None)
 
                 # 只有匹配成功的才处理
                 if matched_category:
@@ -4399,6 +4470,20 @@ class WaylineFingerprintManager:
                     pass
 
             print(f"🏁 同步完成: API共 {len(wayline_list)} 条，匹配并入库 {matched_count} 条。")
+
+            # 5. 清理：删除 API 中已不存在的本地航线
+            api_wayline_ids = {item.get('id') for item in wayline_list if item.get('id')}
+            stale_waylines = Wayline.objects.exclude(wayline_id__in=api_wayline_ids)
+            stale_count = stale_waylines.count()
+            if stale_count > 0:
+                # 先解除外键关联
+                Alarm.objects.filter(wayline__in=stale_waylines).update(wayline=None)
+                InspectTask.objects.filter(wayline__in=stale_waylines).update(wayline=None)
+                WaylineImage.objects.filter(wayline__in=stale_waylines).update(alarm=None)
+                stale_waylines.delete()
+                print(f"🗑️ 已清理 {stale_count} 条 API 中不存在的过期航线")
+            else:
+                print(f"✅ 无过期航线需要清理")
 
         except Exception as e:
             print(f"❌ 同步流程异常: {e}")
